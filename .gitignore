@@ -1,0 +1,12 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# runtime data — NEVER commit (contains the ledger signing key)
+.spendgate/
+
+# logs & OS noise
+*.log
+.DS_Store

@@ -1,0 +1,21 @@
+{
+  "name": "spendgate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SpendGate — the policy and approval layer above every agent payment rail",
+  "type": "module",
+  "workspaces": [
+    "server",
+    "web",
+    "demo"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c gold,cyan \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web",
+    "demo": "npm run start -w demo",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-black text-paper font-body antialiased;
+}
+
+/* former monospace labels/data now render in Montserrat medium for legibility */
+.font-mono {
+  font-weight: 500;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #0e0d0b;
+}
+::-webkit-scrollbar-thumb {
+  background: #2e2b23;
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a362b;
+}
+
+/* ---------- modal animations ---------- */
+@keyframes sgBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.sg-backdrop-in {
+  animation: sgBackdropIn 0.2s ease-out;
+}
+
+/* enter: fade down from above */
+@keyframes sgModalIn {
+  from { opacity: 0; transform: translateY(-18px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.sg-modal-in {
+  animation: sgModalIn 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+
+/* exit: fade up */
+@keyframes sgModalOut {
+  to { opacity: 0; transform: translateY(-14px); }
+}
+.sg-modal-out {
+  animation: sgModalOut 0.2s ease-in forwards;
+}
+.sg-modal-out > div {
+  animation: sgModalOut 0.2s ease-in forwards;
+}
+
+/* approval circle: pop in, then the tick draws */
+@keyframes sgApprove {
+  0% { transform: scale(0.4); opacity: 0; }
+  70% { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.sg-approve-circle {
+  animation: sgApprove 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both;
+}
+
+/* checkmark draw */
+@keyframes sgCheck {
+  to { stroke-dashoffset: 0; }
+}
+.sg-check {
+  stroke-dasharray: 40;
+  stroke-dashoffset: 40;
+  animation: sgCheck 0.3s 0.25s ease-out forwards;
+}
+
+/* ---------- expandable row animations ---------- */
+/* open: fades down into place; close: fades up and out */
+@keyframes sgDetailIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.sg-detail-in {
+  animation: sgDetailIn 0.2s ease-out;
+}
+@keyframes sgDetailOut {
+  to { opacity: 0; transform: translateY(-6px); }
+}
+.sg-detail-out {
+  animation: sgDetailOut 0.18s ease-in forwards;
+}
