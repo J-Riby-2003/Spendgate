@@ -15,6 +15,15 @@ npm run dev        # server :8787 + console :7100
 npm run demo       # in a second terminal — 5 scenarios through every decision path
 ```
 
+## Test it
+
+```bash
+npm run test       # 43 unit tests: sanitize guards, policy rules, ledger chain, engine + idempotency
+npm run test:e2e   # Playwright: token gate, unlock, real agent escalation approved through the UI
+```
+
+Unit tests run against a throwaway data dir; e2e drives the dev servers (reuses the running ones).
+
 ## What's inside
 
 | Piece | Path | What it does |

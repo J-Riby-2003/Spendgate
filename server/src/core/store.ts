@@ -107,8 +107,8 @@ export function rowToApproval(r: Record<string, unknown>): ApprovalRequest {
 const stmts = {
   lastEntry: db.prepare('SELECT * FROM ledger ORDER BY seq DESC LIMIT 1'),
   insertEntry: db.prepare(`INSERT INTO ledger
-    (ts, intent_id, agent_id, amount, currency, vendor, purpose, rail, decision, rule, decided_by, approval_id, prev_hash, hash, signature)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+    (seq, ts, intent_id, agent_id, amount, currency, vendor, purpose, rail, decision, rule, decided_by, approval_id, prev_hash, hash, signature)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   insertApproval: db.prepare(`INSERT INTO approvals (id, intent_json, rule, reason, status, created_at)
     VALUES (?, ?, ?, ?, 'pending', ?)`),
   getApproval: db.prepare('SELECT * FROM approvals WHERE id = ?'),
@@ -144,8 +144,11 @@ export const store = {
   },
 
   appendLedger(e: LedgerEntry): void {
+    // Explicit seq: the hash is computed over e.seq, so the stored seq must be
+    // exactly that value — letting AUTOINCREMENT assign its own (monotonic
+    // even after row deletes) would desync hash from row and break the chain.
     stmts.insertEntry.run(
-      e.ts, e.intentId, e.agentId, e.amount, e.currency, e.vendor, e.purpose, e.rail,
+      e.seq, e.ts, e.intentId, e.agentId, e.amount, e.currency, e.vendor, e.purpose, e.rail,
       e.decision, e.rule, e.decidedBy, e.approvalId, e.prevHash, e.hash, e.signature,
     );
   },
