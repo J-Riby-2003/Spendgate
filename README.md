@@ -42,10 +42,15 @@ Any MCP client (Claude Code, Claude Desktop, your own):
 ```json
 {
   "mcpServers": {
-    "spendgate": { "url": "http://localhost:8787/mcp" }
+    "spendgate": {
+      "url": "http://localhost:8787/mcp",
+      "headers": { "Authorization": "Bearer <console-token>" }
+    }
   }
 }
 ```
+
+The console token is in `.spendgate/console.token` (auto-generated, mode 0600; override with `SPENDGATE_TOKEN`). Mutations and the MCP endpoint require it as a `Bearer` token; read-only GETs and the `/ws` feed stay open.
 
 Then the agent calls `spend(agent, amount, currency, vendor, purpose, rail)` —
 amount in pence/cents.
@@ -56,7 +61,7 @@ amount in pence/cents.
 - Multi-currency budgets are summed naively (per-agent single currency is fine).
 - Agent identity is self-declared — real deployments need API keys / agent identity (Skyfire, Nevermined-style attestation).
 - Ledger signing key is per-server; enterprise wants per-workspace keys + external anchoring (e.g. daily Merkle root).
-- No auth on the console API yet. Don't expose :8787 to the internet.
+- One console bearer token protects all mutations + MCP (`server/src/auth.ts`); read-only GETs and `/ws` are open. Still don't expose :8787 to the internet — per-agent API keys are the real fix.
 
 ## Kill conditions (from the idea doc)
 

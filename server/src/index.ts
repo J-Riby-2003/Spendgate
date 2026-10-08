@@ -12,6 +12,7 @@ import { decide, expireStale, onEvent, emit, EngineError } from './core/engine.j
 import { cleanHhmm, cleanMinor, cleanStr, cleanVendorList, InputError } from './core/sanitize.js';
 import { store } from './core/store.js';
 import { verifyLedger, ledgerToCsv } from './core/ledger.js';
+import { requireToken, CONSOLE_TOKEN_FILE } from './auth.js';
 import type { Policy } from './core/types.js';
 
 const PORT = Number(process.env.SPENDGATE_PORT ?? 8787);
@@ -73,7 +74,7 @@ app.get('/api/approvals', (_req, res) => {
   res.json({ pending: store.pendingApprovals(), recent: store.recentDecidedApprovals(20) });
 });
 
-app.post('/api/approvals/:id/decide', (req, res) => {
+app.post('/api/approvals/:id/decide', requireToken, (req, res) => {
   try {
     const { approve } = req.body ?? {};
     if (typeof approve !== 'boolean') return res.status(422).json({ error: 'approve (boolean) is required' });
@@ -92,7 +93,7 @@ app.get('/api/policies', (_req, res) => {
   res.json(store.listAgents().map((a) => ({ agentId: a.agentId, policy: store.getPolicy(a.agentId) })));
 });
 
-app.put('/api/policies/:agentId', (req, res) => {
+app.put('/api/policies/:agentId', requireToken, (req, res) => {
   try {
     const agentId = req.params.agentId;
     if (!store.listAgents().some((a) => a.agentId === agentId)) {
@@ -127,7 +128,7 @@ app.put('/api/policies/:agentId', (req, res) => {
   }
 });
 
-app.delete('/api/agents/:agentId', (req, res) => {
+app.delete('/api/agents/:agentId', requireToken, (req, res) => {
   const agentId = req.params.agentId;
   if (!store.listAgents().some((a) => a.agentId === agentId)) {
     return res.status(404).json({ error: `Unknown agent "${agentId}".` });
@@ -137,7 +138,7 @@ app.delete('/api/agents/:agentId', (req, res) => {
   res.json({ ok: true });
 });
 
-app.patch('/api/agents/:agentId/currency', (req, res) => {
+app.patch('/api/agents/:agentId/currency', requireToken, (req, res) => {
   const agentId = req.params.agentId;
   const agent = store.listAgents().find((a) => a.agentId === agentId);
   if (!agent) return res.status(404).json({ error: `Unknown agent "${agentId}".` });
@@ -148,7 +149,7 @@ app.patch('/api/agents/:agentId/currency', (req, res) => {
   res.json({ ok: true, currency });
 });
 
-app.post('/api/agents', (req, res) => {
+app.post('/api/agents', requireToken, (req, res) => {
   try {
     const { agentId, currency } = req.body ?? {};
     if (typeof agentId !== 'string' || !/^[a-z0-9-]{2,64}$/.test(agentId)) {
@@ -180,7 +181,7 @@ app.post('/api/agents', (req, res) => {
 });
 
 // ---------- MCP (Streamable HTTP, stateless) ----------
-app.post('/mcp', async (req, res) => {
+app.post('/mcp', requireToken, async (req, res) => {
   try {
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     const server = buildMcpServer();
@@ -236,4 +237,5 @@ httpServer.listen(PORT, () => {
   console.log(`  MCP endpoint:  http://localhost:${PORT}/mcp`);
   console.log(`  Console API:   http://localhost:${PORT}/api/state`);
   console.log(`  WebSocket:     ws://localhost:${PORT}/ws`);
+  console.log(`  Console token: ${CONSOLE_TOKEN_FILE} (Bearer auth required for mutations + MCP)`);
 });

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchState, type State } from './lib/api';
+import { fetchState, hasConsoleToken, setConsoleToken, setUnauthorizedHandler, type State } from './lib/api';
 import { LANG_LABELS, LANGS, useLang, type Lang } from './lib/i18n';
 import Overview from './pages/Overview';
 import Approvals from './pages/Approvals';
@@ -22,6 +22,8 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const { lang, setLang, t } = useLang();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [authed, setAuthed] = useState(() => hasConsoleToken());
+  const [tokenInput, setTokenInput] = useState('');
   const wsRef = useRef<WebSocket | null>(null);
 
   const changeLanguage = (l: Lang) => setLang(l);
@@ -31,6 +33,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    setUnauthorizedHandler(() => setAuthed(false));
     refresh();
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
@@ -42,6 +45,43 @@ export default function App() {
   }, [refresh]);
 
   const pending = state?.stats.pendingApprovals ?? 0;
+
+  if (!authed) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center px-4">
+        <div className="w-full max-w-sm">
+          <p className="font-wordmark text-2xl font-semibold tracking-[0.04em] text-paper">SPENDGATE</p>
+          <p className="font-mono text-[13px] tracking-[0.04em] text-paper mt-2">
+            Console is read-only. Enter the console token to approve requests, edit policies, or manage agents.
+          </p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const token = tokenInput.trim();
+              if (!token) return;
+              setConsoleToken(token);
+              setAuthed(true);
+              refresh();
+            }}
+            className="mt-6 flex gap-2"
+          >
+            <input
+              type="password"
+              value={tokenInput}
+              onChange={(e) => setTokenInput(e.target.value)}
+              aria-label="Console token"
+              placeholder="Console token"
+              autoComplete="off"
+              className="flex-1 min-w-0 h-10 bg-black border border-line rounded-md px-3 font-mono text-[13px] tracking-[0.04em] text-paper placeholder:text-paper/40 focus:outline-none focus:border-white"
+            />
+            <button type="submit" className="h-10 px-4 shrink-0 bg-white text-bg rounded-md font-mono text-[13px] font-semibold hover:bg-paper">
+              Unlock
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-black">

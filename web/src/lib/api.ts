@@ -127,6 +127,41 @@ export function minorToUnits(minor: number | null): string {
   return (minor / 100).toString();
 }
 
+// --- console auth (bearer token, kept in sessionStorage) ---
+let onUnauthorized: (() => void) | null = null;
+
+/** App registers this so a 401 on any mutation can trigger the token gate. */
+export function setUnauthorizedHandler(fn: () => void): void {
+  onUnauthorized = fn;
+}
+
+export function hasConsoleToken(): boolean {
+  return !!sessionStorage.getItem('sg-token');
+}
+
+export function setConsoleToken(token: string): void {
+  sessionStorage.setItem('sg-token', token);
+}
+
+export function clearConsoleToken(): void {
+  sessionStorage.removeItem('sg-token');
+}
+
+function authHeaders(base?: Record<string, string>): Record<string, string> {
+  const token = sessionStorage.getItem('sg-token');
+  return token ? { ...base, Authorization: `Bearer ${token}` } : { ...base };
+}
+
+async function checkOk(res: Response, label: string): Promise<void> {
+  if (res.ok) return;
+  if (res.status === 401) {
+    onUnauthorized?.();
+    throw new Error(`unauthorized: ${label}`);
+  }
+  const body = await res.json().catch(() => ({}));
+  throw new Error(body.error ?? `${label} ${res.status}`);
+}
+
 export async function fetchState(): Promise<State> {
   const res = await fetch('/api/state');
   if (!res.ok) throw new Error(`state ${res.status}`);
@@ -136,52 +171,40 @@ export async function fetchState(): Promise<State> {
 export async function decideApproval(id: string, approve: boolean, note?: string): Promise<void> {
   const res = await fetch(`/api/approvals/${id}/decide`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ approve, by: 'james', note }),
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `decide ${res.status}`);
-  }
+  await checkOk(res, 'decide');
 }
 
 export async function savePolicy(policy: Policy): Promise<void> {
   const res = await fetch(`/api/policies/${policy.agentId}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(policy),
   });
-  if (!res.ok) throw new Error(`save policy ${res.status}`);
+  await checkOk(res, 'save policy');
 }
 
 export async function removeAgent(agentId: string): Promise<void> {
-  const res = await fetch(`/api/agents/${agentId}`, { method: 'DELETE' });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `remove agent ${res.status}`);
-  }
+  const res = await fetch(`/api/agents/${agentId}`, { method: 'DELETE', headers: authHeaders() });
+  await checkOk(res, 'remove agent');
 }
 
 export async function setCurrency(agentId: string, currency: string): Promise<void> {
   const res = await fetch(`/api/agents/${agentId}/currency`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ currency }),
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `currency ${res.status}`);
-  }
+  await checkOk(res, 'currency');
 }
 
 export async function addAgent(agentId: string, displayName: string, currency: string): Promise<void> {
   const res = await fetch('/api/agents', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ agentId, displayName, currency }),
   });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `add agent ${res.status}`);
-  }
+  await checkOk(res, 'add agent');
 }

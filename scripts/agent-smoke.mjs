@@ -8,8 +8,14 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { readFileSync } from 'node:fs';
 
 const ENDPOINT = process.env.SPENDGATE_URL ?? 'http://localhost:8787/mcp';
+// mutations + MCP are bearer-protected; read the console token the server generated
+const TOKEN = (process.env.SPENDGATE_TOKEN ?? readFileSync(new URL('../.spendgate/console.token', import.meta.url), 'utf8')).trim();
+const AUTH = { Authorization: `Bearer ${TOKEN}` };
+// per-run nonce so idempotency keys are hermetic across runs
+const RUN = Date.now().toString(36);
 let failures = 0;
 
 function report(name, ok, detail) {
@@ -19,7 +25,7 @@ function report(name, ok, detail) {
 }
 
 const client = new Client({ name: 'spendgate-smoke-agent', version: '0.1.0' });
-const transport = new StreamableHTTPClientTransport(new URL(ENDPOINT));
+const transport = new StreamableHTTPClientTransport(new URL(ENDPOINT), { requestInit: { headers: AUTH } });
 await client.connect(transport);
 
 // 1. discover tools, like an agent does on connect
@@ -89,7 +95,7 @@ report(
 );
 
 // 7. idempotency — same key twice must not spend twice
-const IDEM = { agent: 'finance-01', amount: 100, currency: 'GBP', vendor: 'acme-analytics', purpose: 'Idempotency test', rail: 'mcp', idempotencyKey: 'smoke-idem-1' };
+const IDEM = { agent: 'finance-01', amount: 100, currency: 'GBP', vendor: 'acme-analytics', purpose: 'Idempotency test', rail: 'mcp', idempotencyKey: `smoke-idem-1-${RUN}` };
 const first = await call('spend', IDEM);
 const second = await call('spend', IDEM);
 const seq1 = first.content?.[0]?.text?.match(/ledger:\s+#(\d+)/)?.[1];
@@ -101,7 +107,7 @@ report(
 );
 
 // 8. idempotent deny replay
-const IDEM_DENY = { agent: 'procurement-02', amount: 50, currency: 'GBP', vendor: 'bobs-discount-emporium', purpose: 'Idempotency deny test', rail: 'mcp', idempotencyKey: 'smoke-idem-deny' };
+const IDEM_DENY = { agent: 'procurement-02', amount: 50, currency: 'GBP', vendor: 'bobs-discount-emporium', purpose: 'Idempotency deny test', rail: 'mcp', idempotencyKey: `smoke-idem-deny-${RUN}` };
 await call('spend', IDEM_DENY);
 const denyReplay = await call('spend', IDEM_DENY);
 const denySeq = denyReplay.content?.[0]?.text?.match(/ledger:\s+#(\d+)/)?.[1];
@@ -112,7 +118,7 @@ report(
 );
 
 // 9. duplicate key while escalation is pending → rejected, no second escalation
-const IDEM_ESC = { agent: 'procurement-02', amount: 90000, currency: 'GBP', vendor: 'paper-mill-co', purpose: 'Idempotency escalation test', rail: 'mcp', idempotencyKey: 'smoke-idem-esc' };
+const IDEM_ESC = { agent: 'procurement-02', amount: 90000, currency: 'GBP', vendor: 'paper-mill-co', purpose: 'Idempotency escalation test', rail: 'mcp', idempotencyKey: `smoke-idem-esc-${RUN}` };
 const escPromise = call('spend', IDEM_ESC).then((r) => r).catch((e) => e);
 await new Promise((r) => setTimeout(r, 400)); // let the first call reach the queue
 const dupWhilePending = await call('spend', IDEM_ESC);
@@ -129,7 +135,7 @@ const pending = (stateRes.pending ?? []).find((a) => a.intent?.purpose === 'Idem
 if (pending) {
   await fetch(`http://localhost:8787/api/approvals/${pending.id}/decide`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...AUTH },
     body: JSON.stringify({ approve: true, by: 'smoke-test' }),
   });
 }
