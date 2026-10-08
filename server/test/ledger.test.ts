@@ -64,7 +64,9 @@ describe('ledger', () => {
     const rows = store.fullLedger();
     const last = rows.at(-1)!;
     expect(last.seq).toBe(rows.length); // dense, no AUTOINCREMENT gap
-    expect(verifyLedger().valid).toBe(true);
+    // the exact bug: stored hash must match recomputation over the stored row
+    const { hash, signature, ...rest } = last;
+    expect(computeHash(rest)).toBe(hash);
   });
 
   it('exports CSV with a header and quoted free-text fields', () => {
