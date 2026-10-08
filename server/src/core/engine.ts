@@ -49,6 +49,7 @@ export async function submitSpend(input: {
   vendor: string;
   purpose: string;
   rail: Rail;
+  idempotencyKey?: string;
 }): Promise<SpendResult> {
   const agent = store.listAgents().find((a) => a.agentId === input.agentId);
   if (!agent) throw new EngineError(`Unknown agent "${input.agentId}". Register it in the console first.`, 404);
@@ -72,6 +73,46 @@ export async function submitSpend(input: {
   const policy = store.getPolicy(input.agentId);
   if (!policy) throw new EngineError(`No policy for agent "${input.agentId}".`, 409);
 
+  // Idempotency: claim the key before any processing. A retry with the same
+  // key replays the original outcome instead of spending again — agents that
+  // retry after timeouts/parsing errors can never double-spend.
+  let idemKey: string | null = null;
+  if (input.idempotencyKey != null) {
+    const key = cleanStr(input.idempotencyKey, 'idempotencyKey', 128);
+    if (!key) throw new EngineError('idempotencyKey must be a non-empty string.', 422);
+    const claim = store.claimIdempotencyKey(input.agentId, key);
+    if (!claim.fresh) {
+      const ex = claim.existing;
+      if (ex?.ledgerSeq != null) {
+        const entry = store.ledgerEntryBySeq(ex.ledgerSeq);
+        if (entry) {
+          return {
+            intent: {
+              id: entry.intentId,
+              agentId: entry.agentId,
+              amount: entry.amount,
+              currency: entry.currency,
+              vendor: entry.vendor,
+              purpose: entry.purpose,
+              rail: entry.rail,
+            },
+            decision: entry.decision,
+            rule: entry.rule,
+            reason: ex.reason ?? entry.rule,
+            decidedBy: entry.decidedBy,
+            approvalId: entry.approvalId,
+            ledgerSeq: entry.seq,
+          };
+        }
+      }
+      throw new EngineError(
+        `Duplicate idempotency key "${key}" — its escalation is still awaiting a human decision.`,
+        409,
+      );
+    }
+    idemKey = key;
+  }
+
   const intent: SpendIntent = {
     id: randomUUID(),
     agentId: input.agentId,
@@ -91,6 +132,7 @@ export async function submitSpend(input: {
   if (verdict.decision === 'ALLOW' || verdict.decision === 'DENY') {
     const decision: LedgerDecision = verdict.decision === 'ALLOW' ? 'ALLOWED' : 'DENIED';
     const entry = appendLedger({ intent, decision, rule: verdict.rule, decidedBy: 'policy' });
+    if (idemKey) store.settleIdempotencyKey(input.agentId, idemKey, { ledgerSeq: entry.seq, approvalId: null, reason: verdict.reason });
     emit({ type: 'ledger', entry });
     emit({ type: 'state' });
     return { intent, decision, rule: verdict.rule, reason: verdict.reason, decidedBy: 'policy', approvalId: null, ledgerSeq: entry.seq };
@@ -131,6 +173,13 @@ export async function submitSpend(input: {
     decidedBy: decided,
     approvalId: approval.id,
   });
+  if (idemKey) {
+    store.settleIdempotencyKey(input.agentId, idemKey, {
+      ledgerSeq: entry.seq,
+      approvalId: approval.id,
+      reason: outcome === 'expired' ? 'No human decided in time — escalations expire denied.' : verdict.reason,
+    });
+  }
   emit({ type: 'ledger', entry });
   emit({ type: 'approvals', pending: store.pendingApprovals() });
   emit({ type: 'state' });

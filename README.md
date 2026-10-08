@@ -29,6 +29,7 @@ npm run demo       # in a second terminal — 5 scenarios through every decision
 ## Design decisions worth knowing
 
 - **Money is integer minor units everywhere** (pence/cents). Never floats.
+- **`spend` takes an optional `idempotencyKey`** — retries after timeouts or parsing errors replay the original decision instead of spending again. Duplicate keys during a pending escalation are rejected with 409.
 - **Default-deny posture**: unknown agent → rejected; no policy → rejected; ambiguous → human.
 - **Deny is rare by design** — blocked vendors only. Over-ceiling spends *escalate*, they don't bounce; the human is the safety valve, and the ledger records who decided.
 - **SQLite via `node:sqlite`** — zero native dependencies, one less thing to break.

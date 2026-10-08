@@ -52,6 +52,15 @@ CREATE TABLE IF NOT EXISTS approvals (
 );
 CREATE INDEX IF NOT EXISTS idx_ledger_agent ON ledger(agent_id);
 CREATE INDEX IF NOT EXISTS idx_ledger_ts ON ledger(ts);
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+  agent_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  ledger_seq INTEGER,
+  approval_id TEXT,
+  reason TEXT,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (agent_id, key)
+);
 `);
 
 // --- signing secret (generated once, lives outside the db) ---
@@ -122,6 +131,10 @@ const stmts = {
   pendingApprovals: db.prepare(`SELECT * FROM approvals WHERE status = 'pending' ORDER BY created_at ASC`),
   recentApprovals: db.prepare(`SELECT * FROM approvals WHERE status != 'pending' ORDER BY decided_at DESC LIMIT ?`),
   pruneExpired: db.prepare(`SELECT * FROM approvals WHERE status = 'pending' AND created_at < ?`),
+  entryBySeq: db.prepare('SELECT * FROM ledger WHERE seq = ?'),
+  claimIdem: db.prepare(`INSERT OR IGNORE INTO idempotency_keys (agent_id, key, created_at) VALUES (?, ?, ?)`),
+  getIdem: db.prepare('SELECT * FROM idempotency_keys WHERE agent_id = ? AND key = ?'),
+  settleIdem: db.prepare(`UPDATE idempotency_keys SET ledger_seq = ?, approval_id = ?, reason = ? WHERE agent_id = ? AND key = ?`),
 };
 
 export const store = {
@@ -212,5 +225,36 @@ export const store = {
 
   stalePending(olderThanIso: string): ApprovalRequest[] {
     return (stmts.pruneExpired.all(olderThanIso) as Record<string, unknown>[]).map(rowToApproval);
+  },
+
+  ledgerEntryBySeq(seq: number): LedgerEntry | null {
+    const r = stmts.entryBySeq.get(seq) as Record<string, unknown> | undefined;
+    return r ? rowToLedgerEntry(r) : null;
+  },
+
+  /**
+   * Claim an idempotency key for an agent. INSERT OR IGNORE makes the
+   * claim atomic — concurrent duplicates race, exactly one wins.
+   * fresh=false means this key was already claimed; existing carries the
+   * settled outcome (or nulls while an escalation is still pending).
+   */
+  claimIdempotencyKey(agentId: string, key: string): {
+    fresh: boolean;
+    existing: { ledgerSeq: number | null; approvalId: string | null; reason: string | null } | null;
+  } {
+    const r = stmts.claimIdem.run(agentId, key, new Date().toISOString());
+    if (r.changes > 0) return { fresh: true, existing: null };
+    const row = stmts.getIdem.get(agentId, key) as Record<string, unknown> | undefined;
+    return {
+      fresh: false,
+      existing: row
+        ? { ledgerSeq: (row.ledger_seq as number | null) ?? null, approvalId: (row.approval_id as string | null) ?? null, reason: (row.reason as string | null) ?? null }
+        : null,
+    };
+  },
+
+  /** Attach the final outcome to a claimed key so retries can replay it. */
+  settleIdempotencyKey(agentId: string, key: string, outcome: { ledgerSeq: number; approvalId: string | null; reason: string }): void {
+    stmts.settleIdem.run(outcome.ledgerSeq, outcome.approvalId, outcome.reason, agentId, key);
   },
 };

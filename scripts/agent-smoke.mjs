@@ -88,6 +88,68 @@ report(
   ledgerText.split('\n').slice(0, 6).join('\n'),
 );
 
+// 7. idempotency — same key twice must not spend twice
+const IDEM = { agent: 'finance-01', amount: 100, currency: 'GBP', vendor: 'acme-analytics', purpose: 'Idempotency test', rail: 'mcp', idempotencyKey: 'smoke-idem-1' };
+const first = await call('spend', IDEM);
+const second = await call('spend', IDEM);
+const seq1 = first.content?.[0]?.text?.match(/ledger:\s+#(\d+)/)?.[1];
+const seq2 = second.content?.[0]?.text?.match(/ledger:\s+#(\d+)/)?.[1];
+report(
+  'idempotent retry returns original decision',
+  !first.isError && !second.isError && seq1 != null && seq1 === seq2,
+  `first → ledger #${seq1}, retry → ledger #${seq2} (same = no double spend)`,
+);
+
+// 8. idempotent deny replay
+const IDEM_DENY = { agent: 'procurement-02', amount: 50, currency: 'GBP', vendor: 'bobs-discount-emporium', purpose: 'Idempotency deny test', rail: 'mcp', idempotencyKey: 'smoke-idem-deny' };
+await call('spend', IDEM_DENY);
+const denyReplay = await call('spend', IDEM_DENY);
+const denySeq = denyReplay.content?.[0]?.text?.match(/ledger:\s+#(\d+)/)?.[1];
+report(
+  'denied intent also replays (same ledger seq)',
+  denyReplay.isError === true && denySeq != null,
+  denyReplay.content?.[0]?.text,
+);
+
+// 9. duplicate key while escalation is pending → rejected, no second escalation
+const IDEM_ESC = { agent: 'procurement-02', amount: 90000, currency: 'GBP', vendor: 'paper-mill-co', purpose: 'Idempotency escalation test', rail: 'mcp', idempotencyKey: 'smoke-idem-esc' };
+const escPromise = call('spend', IDEM_ESC).then((r) => r).catch((e) => e);
+await new Promise((r) => setTimeout(r, 400)); // let the first call reach the queue
+const dupWhilePending = await call('spend', IDEM_ESC);
+const dupText = dupWhilePending.content?.[0]?.text ?? '';
+report(
+  'duplicate during pending escalation rejected (409)',
+  dupWhilePending.isError === true && dupText.includes('409'),
+  dupText.split('\n')[0],
+);
+
+// release the escalation via the console API, first call should resolve APPROVED
+const stateRes = await fetch('http://localhost:8787/api/approvals').then((r) => r.json());
+const pending = (stateRes.pending ?? []).find((a) => a.intent?.purpose === 'Idempotency escalation test');
+if (pending) {
+  await fetch(`http://localhost:8787/api/approvals/${pending.id}/decide`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ approve: true, by: 'smoke-test' }),
+  });
+}
+const escResult = await escPromise;
+const escText = escResult?.content?.[0]?.text ?? '';
+report(
+  'original escalation resolved by human decision',
+  escText.startsWith('APPROVED'),
+  escText.split('\n')[0],
+);
+
+// 10. retry AFTER the escalation settled → replays the approved outcome
+const escReplay = await call('spend', IDEM_ESC);
+const escReplayText = escReplay.content?.[0]?.text ?? '';
+report(
+  'post-decision retry replays approved outcome',
+  !escReplay.isError && escReplayText.startsWith('APPROVED'),
+  escReplayText.split('\n')[0],
+);
+
 await client.close();
 console.log(failures === 0 ? '\nAll checks passed — SpendGate works over real MCP.' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

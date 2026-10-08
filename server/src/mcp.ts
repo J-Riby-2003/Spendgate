@@ -25,6 +25,9 @@ export function buildMcpServer(): McpServer {
       vendor: z.string().min(1).max(120).describe('Who gets paid'),
       purpose: z.string().min(1).max(280).describe('What this payment is for'),
       rail: z.enum(['x402', 'mpp', 'ap2', 'acp', 'card', 'stablecoin', 'mcp']).default('mcp').describe('Payment rail'),
+      idempotencyKey: z.string().min(1).max(128).optional().describe(
+        'Client-generated unique key for this payment intent. Safe to retry: a duplicate key returns the original decision without spending again.',
+      ),
     },
     async (args) => {
       try {
