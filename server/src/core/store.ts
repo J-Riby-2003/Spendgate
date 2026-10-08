@@ -61,6 +61,15 @@ CREATE TABLE IF NOT EXISTS idempotency_keys (
   created_at TEXT NOT NULL,
   PRIMARY KEY (agent_id, key)
 );
+CREATE TABLE IF NOT EXISTS approval_links (
+  token_hash TEXT PRIMARY KEY,
+  approval_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  used_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_links_approval ON approval_links(approval_id);
 `);
 
 // --- signing secret (generated once, lives outside the db) ---
@@ -104,6 +113,26 @@ export function rowToApproval(r: Record<string, unknown>): ApprovalRequest {
   };
 }
 
+export interface ApprovalLink {
+  tokenHash: string;
+  approvalId: string;
+  action: 'approve' | 'reject';
+  createdAt: string;
+  expiresAt: string;
+  usedAt: string | null;
+}
+
+function rowToLink(r: Record<string, unknown>): ApprovalLink {
+  return {
+    tokenHash: r.token_hash as string,
+    approvalId: r.approval_id as string,
+    action: r.action as 'approve' | 'reject',
+    createdAt: r.created_at as string,
+    expiresAt: r.expires_at as string,
+    usedAt: (r.used_at as string | null) ?? null,
+  };
+}
+
 const stmts = {
   lastEntry: db.prepare('SELECT * FROM ledger ORDER BY seq DESC LIMIT 1'),
   insertEntry: db.prepare(`INSERT INTO ledger
@@ -135,6 +164,11 @@ const stmts = {
   claimIdem: db.prepare(`INSERT OR IGNORE INTO idempotency_keys (agent_id, key, created_at) VALUES (?, ?, ?)`),
   getIdem: db.prepare('SELECT * FROM idempotency_keys WHERE agent_id = ? AND key = ?'),
   settleIdem: db.prepare(`UPDATE idempotency_keys SET ledger_seq = ?, approval_id = ?, reason = ? WHERE agent_id = ? AND key = ?`),
+  insertLink: db.prepare(`INSERT INTO approval_links (token_hash, approval_id, action, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?)`),
+  getLink: db.prepare('SELECT * FROM approval_links WHERE token_hash = ?'),
+  linksForApproval: db.prepare('SELECT * FROM approval_links WHERE approval_id = ?'),
+  markLinkUsed: db.prepare('UPDATE approval_links SET used_at = ? WHERE token_hash = ?'),
 };
 
 export const store = {
@@ -155,6 +189,23 @@ export const store = {
 
   createApproval(a: ApprovalRequest): void {
     stmts.insertApproval.run(a.id, JSON.stringify(a.intent), a.rule, a.reason, a.createdAt);
+  },
+
+  insertApprovalLink(link: ApprovalLink): void {
+    stmts.insertLink.run(link.tokenHash, link.approvalId, link.action, link.createdAt, link.expiresAt);
+  },
+
+  getApprovalLink(tokenHash: string): ApprovalLink | null {
+    const r = stmts.getLink.get(tokenHash) as Record<string, unknown> | undefined;
+    return r ? rowToLink(r) : null;
+  },
+
+  linksForApproval(approvalId: string): ApprovalLink[] {
+    return (stmts.linksForApproval.all(approvalId) as Record<string, unknown>[]).map(rowToLink);
+  },
+
+  markLinkUsed(tokenHash: string, usedAt: string): void {
+    stmts.markLinkUsed.run(usedAt, tokenHash);
   },
 
   getApproval(id: string): ApprovalRequest | null {

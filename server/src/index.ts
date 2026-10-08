@@ -13,6 +13,7 @@ import { cleanHhmm, cleanMinor, cleanStr, cleanVendorList, InputError } from './
 import { store } from './core/store.js';
 import { verifyLedger, ledgerToCsv } from './core/ledger.js';
 import { requireToken, CONSOLE_TOKEN_FILE } from './auth.js';
+import { mintDecisionLinks, decideByToken, hashToken } from './decide-links.js';
 import type { Policy } from './core/types.js';
 
 const PORT = Number(process.env.SPENDGATE_PORT ?? 8787);
@@ -72,6 +73,15 @@ app.get('/api/export.csv', (_req, res) => {
 
 app.get('/api/approvals', (_req, res) => {
   res.json({ pending: store.pendingApprovals(), recent: store.recentDecidedApprovals(20) });
+});
+
+// Mint (or fetch fresh) phone-decision links for a pending approval.
+// Bearer-protected: raw capability tokens must only go to the operator.
+app.get('/api/approvals/:id/links', requireToken, (req, res) => {
+  const approval = store.getApproval(req.params.id);
+  if (!approval) return res.status(404).json({ error: 'Unknown approval.' });
+  if (approval.status !== 'pending') return res.status(409).json({ error: 'Approval is no longer pending.' });
+  res.json({ approvalId: approval.id, links: mintDecisionLinks(approval) });
 });
 
 app.post('/api/approvals/:id/decide', requireToken, (req, res) => {
@@ -198,6 +208,34 @@ app.post('/mcp', requireToken, async (req, res) => {
 });
 app.get('/mcp', (_req, res) => res.status(405).json({ error: 'Stateless MCP endpoint: POST only.' }));
 app.delete('/mcp', (_req, res) => res.status(405).json({ error: 'Stateless MCP endpoint: no sessions.' }));
+
+// --- decision links (public one-time capability URLs for phone approvals) ---
+app.get('/api/decide/:token', (req, res) => {
+  const link = store.getApprovalLink(hashToken(req.params.token));
+  if (!link) return res.status(404).json({ error: 'Unknown decision link.' });
+  const approval = store.getApproval(link.approvalId);
+  const now = new Date().toISOString();
+  const state = link.usedAt ? 'used'
+    : link.expiresAt <= now ? 'expired'
+    : approval && approval.status !== 'pending' ? 'decided'
+    : 'pending';
+  res.json({
+    state,
+    action: link.action,
+    approval: approval
+      ? { id: approval.id, status: approval.status, rule: approval.rule, reason: approval.reason, intent: approval.intent, decidedBy: approval.decidedBy }
+      : null,
+  });
+});
+
+app.post('/api/decide/:token', (req, res) => {
+  try {
+    res.json(decideByToken(req.params.token));
+  } catch (err) {
+    if (err instanceof EngineError) return res.status(err.status).json({ error: err.message });
+    throw err;
+  }
+});
 
 // error handler
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

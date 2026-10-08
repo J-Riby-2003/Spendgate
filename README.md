@@ -18,8 +18,8 @@ npm run demo       # in a second terminal — 5 scenarios through every decision
 ## Test it
 
 ```bash
-npm run test       # 43 unit tests: sanitize guards, policy rules, ledger chain, engine + idempotency
-npm run test:e2e   # Playwright: token gate, unlock, real agent escalation approved through the UI
+npm run test       # 49 unit tests: sanitize guards, policy rules, ledger chain, engine, idempotency, decision links
+npm run test:e2e   # builds the web app, then Playwright on :8787: token gate, console approval, phone decision link
 ```
 
 Unit tests run against a throwaway data dir; e2e drives the dev servers (reuses the running ones).
@@ -60,6 +60,17 @@ Any MCP client (Claude Code, Claude Desktop, your own):
 ```
 
 The console token is in `.spendgate/console.token` (auto-generated, mode 0600; override with `SPENDGATE_TOKEN`). Mutations and the MCP endpoint require it as a `Bearer` token; read-only GETs and the `/ws` feed stay open.
+
+## Phone approvals (decision links)
+
+Any pending escalation can be decided from a phone, no console token needed:
+
+1. `GET /api/approvals/:id/links` (bearer token) mints a one-time approve/reject link pair.
+2. Opening `/decide/<token>` shows the request; one tap decides permanently — the agent's blocked call resolves and the decision lands in the signed ledger as `human:decision-link`.
+3. Links are single-use, expire with the escalation, and a retap shows the spent/expired state honestly.
+
+Raw tokens are 24 random bytes; the database stores only their sha256. To try it from a real phone, expose the server (`cloudflared tunnel --url http://localhost:8787`) and open the tunnel URL + link path. The Telegram notifier that pushes these links automatically is step 2 — see `docs/push-approvals-spec.md`.
+
 
 Then the agent calls `spend(agent, amount, currency, vendor, purpose, rail)` —
 amount in pence/cents.

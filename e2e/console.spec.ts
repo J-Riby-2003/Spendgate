@@ -66,6 +66,6 @@ test('agent escalation is approved by a human in the console', async ({ page }) 
   expect(text.startsWith('APPROVED')).toBe(true);
   await client.close();
 
-  // the queue is drained again (Recent decisions does not repeat the purpose text)
-  await expect(page.getByText('No pending escalations.')).toBeVisible();
+  // this escalation leaves the queue (other pending items may legitimately exist)
+  await expect(page.locator('div.rounded-lg', { hasText: purpose })).toHaveCount(0);
 });
