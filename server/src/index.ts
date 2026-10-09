@@ -199,9 +199,20 @@ app.post('/api/agents', requireToken, (req, res) => {
 // ---------- MCP (Streamable HTTP, stateless) ----------
 app.post('/mcp', requireToken, async (req, res) => {
   try {
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    // SSE mode (not JSON): escalations hold this stream open for minutes and
+    // edge proxies (Fly included) kill connections idle ~60s. Heartbeat
+    // comments below keep the stream alive until the decision lands.
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: false });
     const server = buildMcpServer();
+    const heartbeat = setInterval(() => {
+      if (res.writableEnded) { clearInterval(heartbeat); return; }
+      const ct = res.getHeader('content-type');
+      if (res.headersSent && typeof ct === 'string' && ct.includes('text/event-stream')) {
+        res.write(': ping\n\n');
+      }
+    }, 20_000);
     res.on('close', () => {
+      clearInterval(heartbeat);
       void transport.close();
       void server.close();
     });
