@@ -43,11 +43,8 @@ test('decision link approves an escalation from the phone page', async ({ page }
     .then((r) => r.json()) as { links: { action: string; path: string }[] };
   const approvePath = links.find((l) => l.action === 'approve')!.path;
 
-  // the phone opens the public page and taps Approve
+  // the phone opens the public link — one tap decides instantly
   await page.goto(approvePath);
-  await expect(page.getByText(purpose)).toBeVisible();
-  await expect(page.getByText('→ paper-mill-co')).toBeVisible();
-  await page.getByRole('button', { name: 'Approve' }).click();
   await expect(page.getByText('APPROVED')).toBeVisible();
 
   // the blocked agent call resolves with the same decision
