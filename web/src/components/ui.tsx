@@ -23,6 +23,8 @@ const TONES: Record<string, string> = {
   pending: 'bg-[#E8A020]',
   approved: 'bg-[#4CAF50]',
   rejected: 'bg-[#E0522A]',
+  approve: 'bg-[#4CAF50]',
+  reject: 'bg-[#E0522A]',
   expired: 'bg-[#8A8474]',
 };
 
