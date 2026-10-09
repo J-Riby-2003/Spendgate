@@ -1,4 +1,5 @@
 // SpendGate server: REST console API + WebSocket live feed + MCP (Streamable HTTP).
+import './config.js'; // loads .spendgate/env — must run before any env reads
 import express from 'express';
 import cors from 'cors';
 import { createServer } from 'node:http';
@@ -14,6 +15,7 @@ import { store } from './core/store.js';
 import { verifyLedger, ledgerToCsv } from './core/ledger.js';
 import { requireToken, CONSOLE_TOKEN_FILE } from './auth.js';
 import { mintDecisionLinks, decideByToken, hashToken } from './decide-links.js';
+import { attachNotifier, resolveNotifier } from './notify.js';
 import type { Policy } from './core/types.js';
 
 const PORT = Number(process.env.SPENDGATE_PORT ?? 8787);
@@ -22,6 +24,10 @@ app.use(cors());
 app.use(express.json({ limit: '256kb' }));
 
 seed();
+
+// push a decision-link pair to Telegram (if configured) for every new escalation
+const notifier = resolveNotifier();
+attachNotifier(onEvent, notifier);
 
 // ---------- state snapshot for the console ----------
 function buildState() {
@@ -276,4 +282,5 @@ httpServer.listen(PORT, () => {
   console.log(`  Console API:   http://localhost:${PORT}/api/state`);
   console.log(`  WebSocket:     ws://localhost:${PORT}/ws`);
   console.log(`  Console token: ${CONSOLE_TOKEN_FILE} (Bearer auth required for mutations + MCP)`);
+  if (notifier) console.log(`  Notifications: ${notifier.name} push approvals`);
 });

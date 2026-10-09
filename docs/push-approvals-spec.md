@@ -89,7 +89,7 @@ Notifier failure is logged, never thrown — the console remains the fallback.
 ## Build order (each step is shippable)
 
 1. `approval_links` table + token mint/consume + `/api/decide/:token` + Decide page (test end-to-end with a hand-crafted link before any bot exists).
-2. Telegram notifier + env config + engine hook.
+2. Telegram notifier + env config + engine hook. (done — wired via the approvals event bus in `server/src/notify.ts` rather than inside the engine, so a failed push can never touch agent flow)
 3. Polish: reject button, expiry page, "already decided" page, README + `.env.example`.
 4. (Later) WhatsApp/web push behind the same `Notifier` interface; multi-user routing (who gets paged for which agent's spend).
 

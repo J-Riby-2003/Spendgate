@@ -18,7 +18,7 @@ npm run demo       # in a second terminal — 5 scenarios through every decision
 ## Test it
 
 ```bash
-npm run test       # 49 unit tests: sanitize guards, policy rules, ledger chain, engine, idempotency, decision links
+npm run test       # 55 unit tests: sanitize guards, policy rules, ledger chain, engine, idempotency, decision links
 npm run test:e2e   # builds the web app, then Playwright on :8787: token gate, console approval, phone decision link
 ```
 
@@ -69,7 +69,23 @@ Any pending escalation can be decided from a phone, no console token needed:
 2. Opening `/decide/<token>` shows the request; one tap decides permanently — the agent's blocked call resolves and the decision lands in the signed ledger as `human:decision-link`.
 3. Links are single-use, expire with the escalation, and a retap shows the spent/expired state honestly.
 
-Raw tokens are 24 random bytes; the database stores only their sha256. To try it from a real phone, expose the server (`cloudflared tunnel --url http://localhost:8787`) and open the tunnel URL + link path. The Telegram notifier that pushes these links automatically is step 2 — see `docs/push-approvals-spec.md`.
+Raw tokens are 24 random bytes; the database stores only their sha256. To try it from a real phone, expose the server (`cloudflared tunnel --url http://localhost:8787`) and open the tunnel URL + link path.
+
+### Automatic push (Telegram)
+
+Every new escalation arrives on your phone with Approve/Reject buttons — no console needed:
+
+1. Telegram → **@BotFather** → `/newbot` → copy the token.
+2. Text your new bot anything, then open `https://api.telegram.org/bot<token>/getUpdates` and copy your `chat.id`.
+3. Put both in `.spendgate/env` (auto-loaded by the server, already gitignored):
+
+```
+SPENDGATE_TELEGRAM_BOT_TOKEN=123:abc
+SPENDGATE_TELEGRAM_CHAT_ID=456
+SPENDGATE_PUBLIC_BASE_URL=https://your-tunnel.example
+```
+
+`SPENDGATE_PUBLIC_BASE_URL` only matters off-LAN — it's the origin baked into the phone link buttons. Restart the server; the startup banner confirms `Notifications: telegram push approvals`. See `docs/push-approvals-spec.md` for the design.
 
 
 Then the agent calls `spend(agent, amount, currency, vendor, purpose, rail)` —
