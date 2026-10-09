@@ -49,9 +49,12 @@ describe('telegram push on escalation', () => {
     expect(url).toBe('https://api.telegram.org/botB/sendMessage');
     const body = JSON.parse(String(init.body));
     expect(body.chat_id).toBe('C');
+    expect(body.parse_mode).toBe('HTML');
+    expect(body.text).toContain('<b>SpendGate approval needed</b>');
     expect(body.text).toContain('acme');
     expect(body.text).toContain('£250.00');
     expect(body.text).toContain('notify-test');
+    expect(body.text).toContain('over-max-per-txn');
     const buttons = body.reply_markup.inline_keyboard[0];
     expect(buttons).toHaveLength(2);
     expect(buttons[0]).toMatchObject({ text: '✅ Approve', url: expect.stringMatching(/^https:\/\/gate\.example\/decide\/.+$/) });
@@ -79,6 +82,39 @@ describe('telegram push on escalation', () => {
     const p = escalate('second push test');
     await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBe(callsBefore + 1), { timeout: 5_000 });
     decide(store.pendingApprovals().at(-1)!.id, true, 'cleanup');
+    await p;
+  });
+});
+
+describe('confirm — the bot replies after a decision', () => {
+  it('says APPROVED with the payment summary', async () => {
+    const notifier = telegramNotifier({ botToken: 'B', chatId: 'C', baseUrl: 'https://gate.example', fetchImpl: (...args) => fetchMock(...args) });
+    const p = escalate('confirm approved test');
+    await new Promise((r) => setTimeout(r, 50));
+    const pending = store.pendingApprovals().at(-1)!;
+
+    await notifier.confirm!(pending, 'approved');
+    const [url, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit];
+    expect(url).toBe('https://api.telegram.org/botB/sendMessage');
+    const body = JSON.parse(String(init.body));
+    expect(body.parse_mode).toBe('HTML');
+    expect(body.text).toContain('<b>APPROVED</b>');
+    expect(body.text).toContain('acme');
+    expect(body.text).not.toContain('inline_keyboard');
+    decide(pending.id, true, 'cleanup');
+    await p;
+  });
+
+  it('says REJECTED for a rejection', async () => {
+    const notifier = telegramNotifier({ botToken: 'B', chatId: 'C', baseUrl: 'https://gate.example', fetchImpl: (...args) => fetchMock(...args) });
+    const p = escalate('confirm rejected test');
+    await new Promise((r) => setTimeout(r, 50));
+    const pending = store.pendingApprovals().at(-1)!;
+
+    await notifier.confirm!(pending, 'rejected');
+    const body = JSON.parse(String((fetchMock.mock.calls.at(-1) as [string, RequestInit])[1].body));
+    expect(body.text).toContain('<b>REJECTED</b>');
+    decide(pending.id, true, 'cleanup');
     await p;
   });
 });

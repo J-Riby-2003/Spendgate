@@ -236,7 +236,14 @@ app.get('/api/decide/:token', (req, res) => {
 
 app.post('/api/decide/:token', (req, res) => {
   try {
-    res.json(decideByToken(req.params.token));
+    const outcome = decideByToken(req.params.token);
+    const approval = store.getApproval(outcome.approvalId);
+    if (notifier?.confirm && approval) {
+      void notifier.confirm(approval, outcome.decision).catch((err) => {
+        console.error('[notify] decision confirmation failed:', err);
+      });
+    }
+    res.json(outcome);
   } catch (err) {
     if (err instanceof EngineError) return res.status(err.status).json({ error: err.message });
     throw err;
