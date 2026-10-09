@@ -1,0 +1,12 @@
+node_modules
+web/dist
+.spendgate
+.git
+e2e
+playwright-report
+test-results
+*.log
+.DS_Store
+Dockerfile
+docker-compose.yml
+fly.toml

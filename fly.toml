@@ -1,0 +1,30 @@
+app = 'spendgate'
+primary_region = 'lhr'
+kill_signal = 'SIGINT'
+kill_timeout = 5
+
+[build]
+
+# SQLite data + generated console token persist across deploys.
+[[mounts]]
+  source = 'spendgate_data'
+  destination = '/data'
+  initial_size = '1gb'
+
+[env]
+  SPENDGATE_PORT = '8787'
+  SPENDGATE_DATA = '/data'
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  # Escalations block agents for up to 5 minutes awaiting a human tap —
+  # the machine must never sleep mid-decision.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1

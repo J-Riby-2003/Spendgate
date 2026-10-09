@@ -211,6 +211,20 @@ export function expireStale(): void {
   const cutoff = new Date(Date.now() - APPROVAL_TIMEOUT_MS).toISOString();
   for (const a of store.stalePending(cutoff)) {
     store.decideApproval(a.id, 'rejected', 'expiry', 'Escalation timed out');
-    resolveWaiter(a.id, 'expired');
+    // With a live waiter the blocked submitSpend continues and appends the
+    // EXPIRED row itself. After a process restart no waiter exists — append
+    // here so every intent still lands in the ledger regardless of outcome.
+    if (!resolveWaiter(a.id, 'expired')) {
+      appendLedger({
+        intent: a.intent,
+        decision: 'EXPIRED',
+        rule: a.rule,
+        decidedBy: 'expiry',
+        approvalId: a.id,
+      });
+      emit({ type: 'ledger', entry: store.recentLedger(1)[0] });
+    }
   }
+  emit({ type: 'approvals', pending: store.pendingApprovals() });
+  emit({ type: 'state' });
 }
