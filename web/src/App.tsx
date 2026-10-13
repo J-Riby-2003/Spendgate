@@ -33,9 +33,9 @@ export default function App() {
 
   const changeLanguage = (l: Lang) => setLang(l);
 
-  const refresh = useCallback(() => {
+  const refresh = useCallback(async () => {
     const version = sessionVersion.current;
-    fetchState().then(next => { if (version === sessionVersion.current) setState(next); }).catch(() => undefined);
+    await fetchState().then(next => { if (version === sessionVersion.current) setState(next); }).catch(() => undefined);
   }, []);
 
   const clearSession = useCallback(() => {
@@ -52,18 +52,19 @@ export default function App() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     wsRef.current = ws;
-    ws.onopen = () => setConnected(true);
+    ws.onopen = () => { setConnected(true); refresh(); };
     ws.onclose = (event) => { setConnected(false); if (event.code === 4001) clearSession(); };
     ws.onmessage = () => refresh();
     // HTTP activity renews idle time only while the operator uses the console.
     const recheck = () => { if (document.visibilityState === 'visible') refresh(); };
     let lastActivity = 0;
     const activity = () => { if (Date.now() - lastActivity >= 30_000) { lastActivity = Date.now(); recordActivity().catch(() => undefined); } };
+    const stateCheck = setInterval(recheck, 10_000);
     const sessionCheck = setInterval(() => { loadSession().then(valid => { if (!valid) clearSession(); }).catch(() => undefined); }, 30_000);
     window.addEventListener('focus', recheck);
     window.addEventListener('pointerdown', activity);
     window.addEventListener('keydown', activity);
-    return () => { clearInterval(sessionCheck); ws.close(); window.removeEventListener('focus', recheck); window.removeEventListener('pointerdown', activity); window.removeEventListener('keydown', activity); };
+    return () => { clearInterval(stateCheck); clearInterval(sessionCheck); ws.close(); window.removeEventListener('focus', recheck); window.removeEventListener('pointerdown', activity); window.removeEventListener('keydown', activity); };
   }, [authed, clearSession, refresh]);
 
   const pending = state?.stats.pendingApprovals ?? 0;
@@ -172,7 +173,7 @@ export default function App() {
         {state ? (
           <>
             {page === 'overview' && <Overview state={state} />}
-            {page === 'approvals' && <Approvals state={state} />}
+            {page === 'approvals' && <Approvals state={state} refresh={refresh} />}
             {page === 'agents' && <Agents state={state} />}
             {page === 'ledger' && <Ledger state={state} />}
           </>
