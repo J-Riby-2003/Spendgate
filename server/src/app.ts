@@ -27,7 +27,7 @@ seed();
 
 // push a decision-link pair to Telegram (if configured) for every new escalation
 const notifier = resolveNotifier();
-attachNotifier(onEvent, notifier);
+const detachNotifier = attachNotifier(onEvent, notifier);
 
 // ---------- state snapshot for the console ----------
 function buildState() {
@@ -308,8 +308,8 @@ app.post('/api/decide/:token', (req, res) => {
     const outcome = decideByToken(req.params.token);
     const approval = store.getApproval(outcome.approvalId);
     if (notifier?.confirm && approval) {
-      void notifier.confirm(approval, outcome.decision).catch((err) => {
-        console.error('[notify] decision confirmation failed:', err);
+      void notifier.confirm(approval, outcome.decision).catch(() => {
+        console.error('[notify] decision confirmation failed');
       });
     }
     res.json(outcome);
@@ -366,7 +366,7 @@ function revokeStream(id: string) { for (const stream of activeMcp.values()) if 
 authEvents.on('session-revoked', revokeSession);
 authEvents.on('credential-revoked', revokeStream);
 httpServer.on('close', () => {
-  clearInterval(expireSessions); clearInterval(expireApprovals); unsubscribe();
+  clearInterval(expireSessions); clearInterval(expireApprovals); unsubscribe(); detachNotifier();
   authEvents.off('session-revoked', revokeSession); authEvents.off('credential-revoked', revokeStream);
   for (const ws of wss.clients) ws.terminate();
   wss.close();

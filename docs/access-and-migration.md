@@ -35,7 +35,7 @@ type Principal = OperatorPrincipal | AgentPrincipal;
 
 `requireOperator` and `requireAgent` are Express middleware; validated identity is in `res.locals.principal`. `authenticateSession(token, touch = true)` and `authenticateAgent(token)` return the corresponding principal or null. `assertAgentActive(principal)` revalidates credential/agent existence at a tool boundary. `buildMcpServer(principal)` requires an authenticated agent principal. Existing optional MCP `agent` arguments must match that identity; omitting them uses the credential identity. All three tools enforce this, and unfiltered `audit_ledger` returns only that agent's records.
 
-Console decisions pass `operatorId` to the engine, which retains its existing `human:<operatorId>` ledger convention. Caller-supplied `by` is ignored. Public phone-link decisions retain `human:decision-link`: they are capability-authorised, not attributed to an operator session.
+Console decisions pass `operatorId` to the engine, which retains its existing `human:<operatorId>` ledger convention. Caller-supplied `by` is ignored. Public phone-link decisions retain `human:decision-link`: they are capability-authorised, not attributed to an operator session. Existing used/expired link pages can still show the original request details and status; they cannot execute another decision or access another request.
 
 `authEvents` emits `session-revoked(sessionId)` and `credential-revoked(credentialId)` only after successful storage changes. Credential revocation/rotation closes active MCP streams with a protocol error. It does not cancel, delete or decide pending approvals. Issue #7 owns resumable request lookup and durable finalisation; this change does not claim to implement those.
 

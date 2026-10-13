@@ -143,3 +143,17 @@ describe('resolveNotifier', () => {
     void n;
   });
 });
+
+it('does not log secret-bearing upstream errors when notification delivery fails', async () => {
+  const logged: string[] = [];
+  const capture = vi.spyOn(console, 'error').mockImplementation((...args) => { logged.push(args.map(String).join(' ')); });
+  attachNotifier(onEvent, { name: 'test', async send() { throw new Error('https://provider.example/secret-bearer-token'); } });
+  const result = escalate('redacted notification error');
+  try {
+    await vi.waitFor(() => expect(logged.length).toBeGreaterThan(0));
+    expect(logged.join('\n')).not.toContain('secret-bearer-token');
+  } finally {
+    decide(store.pendingApprovals().at(-1)!.id, false, 'cleanup');
+    await result; capture.mockRestore();
+  }
+});

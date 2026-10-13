@@ -51,8 +51,7 @@ export function telegramNotifier(opts: TelegramOpts): Notifier {
       }),
     });
     if (!res.ok) {
-      const detail = await res.text().catch(() => '');
-      throw new Error(`Telegram API ${res.status}: ${detail.slice(0, 200)}`);
+      throw new Error(`Telegram API ${res.status}`);
     }
   }
 
@@ -112,17 +111,18 @@ export function resolveNotifier(env: NodeJS.ProcessEnv = process.env): Notifier 
 }
 
 /** Subscribe to engine events and push a decision-link pair per new escalation. */
-export function attachNotifier(subscribe: typeof onEvent, notifier: Notifier | null): void {
-  if (!notifier) return;
+export function attachNotifier(subscribe: typeof onEvent, notifier: Notifier | null): () => void {
+  if (!notifier) return () => {};
   const pushed = new Set<string>();
-  subscribe((event) => {
+  return subscribe((event) => {
     if (event.type !== 'approvals') return;
     for (const approval of event.pending as ApprovalRequest[]) {
       if (pushed.has(approval.id)) continue;
       pushed.add(approval.id);
       const links = mintDecisionLinks(approval);
-      notifier.send(approval, links).catch((err) => {
-        console.error(`[notify] ${notifier.name} push failed for approval ${approval.id}:`, err);
+      notifier.send(approval, links).catch(() => {
+        // Upstream errors may embed bot credentials or capability URLs.
+        console.error(`[notify] push failed for approval ${approval.id}`);
       });
     }
   });
