@@ -133,3 +133,26 @@ it('background reads do not renew idle time; authenticated user activity does', 
   expect((await request('/api/auth/activity', 'POST', {}, headers)).status).toBe(200);
   expect(Number(db.prepare('SELECT last_seen_at FROM operator_sessions WHERE id=?').get(session.principal.sessionId)!.last_seen_at)).toBeGreaterThan(before);
 });
+it('supports deferred requests and scoped outcome retrieval after a client reconnects', async () => {
+  const cred = issueCredential('alpha', operatorId);
+  const c = await client(cred.secret);
+  const args = { amount: 3000, currency: 'GBP', vendor: 'vendor', purpose: 'deferred-test', deferred: true, idempotencyKey: 'deferred-1' };
+  const pending = await c.callTool({ name: 'spend', arguments: args });
+  expect(pending.isError).toBe(false);
+  const snapshot = pending.structuredContent as any;
+  expect(snapshot.decision).toBe('PENDING');
+  expect(snapshot.requestId).toBeTruthy();
+  await c.close();
+  const next = await client(cred.secret);
+  const retry = await next.callTool({ name: 'spend', arguments: args });
+  expect((retry.structuredContent as any).requestId).toBe(snapshot.requestId);
+  const betaCredential = issueCredential('beta', operatorId);
+  const betaClient = await client(betaCredential.secret);
+  const foreign = await betaClient.callTool({ name: 'spend_status', arguments: { requestId: snapshot.requestId } });
+  expect(foreign.isError).toBe(true);
+  expect(JSON.stringify(foreign)).not.toContain('deferred-test');
+  decide(snapshot.approvalId, false, operatorId, 'Reviewed after reconnect');
+  const final = await next.callTool({ name: 'spend_status', arguments: { requestId: snapshot.requestId } });
+  expect((final.structuredContent as any).decision).toBe('REJECTED');
+  expect((final.structuredContent as any).ledgerSeq).toBeTruthy();
+});

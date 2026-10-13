@@ -1,17 +1,24 @@
 // The audit ledger: append-only, hash-chained, HMAC-signed.
 // Tampering with any row breaks the chain on verify — that is the product.
 import { createHash, createHmac } from 'node:crypto';
-import type { LedgerDecision, LedgerEntry, SpendIntent } from './types.js';
+import type { LedgerDecision, LedgerEntry, SpendIntent, DecisionDetails } from './types.js';
 import { store, SECRET } from './store.js';
 
 const GENESIS = 'GENESIS';
 
 function canonical(e: Omit<LedgerEntry, 'hash' | 'signature'>): string {
-  return [
+  const legacy = [
     e.seq, e.ts, e.intentId, e.agentId, e.amount, e.currency, e.vendor,
     e.purpose, e.rail, e.decision, e.rule, e.decidedBy, e.approvalId ?? '',
     e.prevHash,
   ].join('|');
+  if ((e.eventVersion ?? 1) === 1) {
+    if (e.details != null) throw new Error('Unsigned details on legacy ledger event');
+    return legacy;
+  }
+  if (e.eventVersion !== 2) throw new Error('Unsupported ledger event version');
+  return JSON.stringify([2, e.seq, e.ts, e.intentId, e.agentId, e.amount, e.currency, e.vendor,
+    e.purpose, e.rail, e.decision, e.rule, e.decidedBy, e.approvalId, e.prevHash, e.details ?? null]);
 }
 
 export function computeHash(entry: Omit<LedgerEntry, 'hash' | 'signature'>): string {
@@ -28,12 +35,16 @@ export function appendLedger(opts: {
   rule: string;
   decidedBy: string;
   approvalId?: string | null;
+  details?: DecisionDetails;
+  now?: Date;
 }): LedgerEntry {
   const last = store.lastLedgerEntry();
   const seq = (last?.seq ?? 0) + 1;
   const entry: Omit<LedgerEntry, 'hash' | 'signature'> = {
     seq,
-    ts: new Date().toISOString(),
+    ts: (opts.now ?? new Date()).toISOString(),
+    eventVersion: opts.details ? 2 : 1,
+    details: opts.details ?? null,
     intentId: opts.intent.id,
     agentId: opts.intent.agentId,
     amount: opts.intent.amount,
@@ -58,7 +69,8 @@ export function verifyLedger(): { valid: boolean; entries: number; brokenAt: num
   let prev = GENESIS;
   for (const row of rows) {
     const { hash, signature, ...rest } = row;
-    const recomputed = computeHash(rest);
+    let recomputed: string;
+    try { recomputed = computeHash(rest); } catch { return { valid: false, entries: rows.length, brokenAt: row.seq }; }
     if (row.prevHash !== prev || recomputed !== hash || sign(recomputed) !== signature) {
       return { valid: false, entries: rows.length, brokenAt: row.seq };
     }
@@ -68,10 +80,10 @@ export function verifyLedger(): { valid: boolean; entries: number; brokenAt: num
 }
 
 export function ledgerToCsv(entries: LedgerEntry[]): string {
-  const header = 'seq,ts,intent_id,agent_id,amount_minor,currency,vendor,purpose,rail,decision,rule,decided_by,approval_id,prev_hash,hash,signature';
+  const header = 'seq,ts,intent_id,agent_id,amount_minor,currency,vendor,purpose,rail,decision,rule,decided_by,approval_id,prev_hash,hash,signature,event_version,details_json';
   const esc = (s: string) => `"${String(s).replaceAll('"', '""')}"`;
   const lines = entries.map((e) =>
-    [e.seq, e.ts, e.intentId, e.agentId, e.amount, e.currency, esc(e.vendor), esc(e.purpose), e.rail, e.decision, e.rule, e.decidedBy, e.approvalId ?? '', e.prevHash, e.hash, e.signature].join(','),
+    [e.seq, e.ts, e.intentId, e.agentId, e.amount, e.currency, esc(e.vendor), esc(e.purpose), e.rail, e.decision, e.rule, e.decidedBy, e.approvalId ?? '', e.prevHash, e.hash, e.signature, e.eventVersion ?? 1, esc(JSON.stringify(e.details ?? null))].join(','),
   );
   return [header, ...lines].join('\n');
 }

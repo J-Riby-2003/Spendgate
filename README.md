@@ -31,7 +31,7 @@ Unit tests run against a throwaway data dir; e2e starts a separate server on :18
 |---|---|---|
 | Policy engine | `server/src/core/policy.ts` | Per-agent rules: auto-approve ceiling, daily budget, approval threshold, vendor lists, new-vendor gate, day/time windows. Hard denies only for blocked vendors; everything ambiguous escalates to a human. |
 | Signed ledger | `server/src/core/ledger.ts` | Append-only, hash-chained rows, HMAC-signed. `GET /api/ledger/verify` re-computes the chain; tamper with any row and it fails. CSV/JSON export for auditors. |
-| Approval queue | `server/src/core/engine.ts` | Escalated intents block the agent's MCP call until a human decides in the console (or a 5-min timeout expires them denied). |
+| Approval queue | `server/src/core/engine.ts` | Durable pending requests survive reconnects/restarts. Blocking is the default; deferred submission and scoped status support longer human workflows. |
 | MCP server | `server/src/mcp.ts` → `http://localhost:8787/mcp` | Tools: `spend`, `budget_status`, `audit_ledger`. Point any MCP-capable agent at it. |
 | Console | `web/` | Live overview, approvals inbox, per-agent policy editor, ledger with verify + export. Dark/gold, Oranienbaum — same design language as the landing page. |
 | Demo agent | `demo/` | Drives allow → escalate → deny → new-vendor → blocked-vendor scenarios end-to-end. |
@@ -39,7 +39,7 @@ Unit tests run against a throwaway data dir; e2e starts a separate server on :18
 ## Design decisions worth knowing
 
 - **Money is integer minor units everywhere**, using the configured currency precision. Never floats.
-- **`spend` takes an optional `idempotencyKey`** — retries after timeouts or parsing errors replay the original decision instead of reserving again. Duplicate keys during a pending escalation are rejected with 409.
+- **`spend` takes an optional `idempotencyKey`** — retries after timeouts or parsing errors replay the original decision instead of reserving again. Matching pending retries return/resume the same request; conflicting key reuse returns 409.
 - **Default-deny posture**: unknown agent → rejected; no policy → rejected; ambiguous → human.
 - **Budget modes are explicit** — blocked vendors and hard-stop budget overruns deny. Approval-override permits an authenticated operator to exceed available funds with a recorded reason; other ambiguous policy rules escalate.
 - **SQLite via `node:sqlite`** — zero native dependencies, one less thing to break.
@@ -98,7 +98,7 @@ Permission reserves funds; completed spend requires verified settlement. New age
 
 ## Honest prototype limits (next steps)
 
-- Escalations wait up to 5 min then expire — approvals belong on your phone (WhatsApp/Telegram/push), not just this console.
+- Approval expiry defaults to 5 minutes, configurable from 1 minute to 7 days. Deferred MCP/status and durable notification retries are described in [durable approvals](docs/durable-approvals.md).
 - Budget accounting uses one configured currency per agent, explicit modes and persistent reservations. See [budget accounting](docs/budget-accounting.md) for migration, reconciliation and execution integration obligations.
 - Agent identity is bound to revocable per-agent credentials. One provisioned operator is supported initially; SSO and multi-workspace tenancy are future work.
 - Ledger signing key is per-server; enterprise wants per-workspace keys + external anchoring (e.g. daily Merkle root).

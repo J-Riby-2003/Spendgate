@@ -37,7 +37,16 @@ export interface Policy {
 
 export type LedgerDecision = 'ALLOWED' | 'APPROVED' | 'DENIED' | 'REJECTED' | 'EXPIRED';
 
+export interface DecisionDetails {
+  actor: { kind: 'policy' | 'operator' | 'decision-link' | 'expiry'; id: string | null };
+  note: string | null;
+  evidence: { schemaVersion: number; digest: string } | null;
+  budgetRecheck: { reservedMinor: number; remainingMinor: number | null; overrideReason: string | null } | null;
+}
+
 export interface LedgerEntry {
+  eventVersion?: 1 | 2;
+  details?: DecisionDetails | null;
   seq: number;
   ts: string; // ISO
   intentId: string;
@@ -64,6 +73,7 @@ export interface ApprovalRequest {
   rule: string;
   reason: string;
   status: ApprovalStatus;
+  expiresAt?: string; // present on every persisted approval; optional for legacy callers constructing rows
   createdAt: string;
   decidedAt: string | null;
   decidedBy: string | null;

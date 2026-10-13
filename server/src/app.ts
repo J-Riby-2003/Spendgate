@@ -14,7 +14,7 @@ import { store, db, withImmediateTransaction } from './core/store.js';
 import { verifyLedger, ledgerToCsv } from './core/ledger.js';
 import { requireOperator, requireAgent, requireCsrf, requireOrigin, allowedOrigin, sessionToken, authenticateSession, assertAgentActive, authEvents, login, logout, csrfToken, SESSION_COOKIE, cookieOptions, AuthError, issueCredential, listCredentials, rotateCredential, revokeCredential, deleteAgentWithCredentials, type OperatorPrincipal } from './auth.js';
 import { mintDecisionLinks, decideByToken, hashToken } from './decide-links.js';
-import { attachNotifier, resolveNotifier } from './notify.js';
+import { attachNotifier, resolveNotifier, notificationStatus } from './notify.js';
 import { budget } from './core/budget-state.js';
 import { BudgetError, type ReconcileInput } from './core/budget.js';
 import { isSupportedCurrency } from '../../shared/currency.js';
@@ -27,12 +27,16 @@ app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'
 app.use(express.json({ limit: '256kb' }));
 
 seed();
+expireStale(); // reconcile overdue durable requests before accepting traffic or delivering links
 
 // push a decision-link pair to Telegram (if configured) for every new escalation
 const notifier = resolveNotifier();
 const detachNotifier = attachNotifier(onEvent, notifier);
 
 // ---------- state snapshot for the console ----------
+function approvalProjection(a: ReturnType<typeof store.pendingApprovals>[number]) {
+  return { ...a, requestId: a.intent.id, notification: { ...notificationStatus(a.id), configured: notifier !== null } };
+}
 function buildState() {
   const agents = store.listAgents().map((a) => ({
     ...a,
@@ -46,8 +50,8 @@ function buildState() {
   return {
     agents,
     ledger: store.recentLedger(50),
-    approvalsPending: store.pendingApprovals(),
-    approvalsRecent: store.recentDecidedApprovals(20),
+    approvalsPending: store.pendingApprovals().map(approvalProjection),
+    approvalsRecent: store.recentDecidedApprovals(20).map(approvalProjection),
     stats: {
       allowedToday: allToday.filter((e) => e.decision === 'ALLOWED').length,
       approvedToday: allToday.filter((e) => e.decision === 'APPROVED').length,
@@ -127,13 +131,21 @@ app.get('/api/export.csv', (_req, res) => {
   res.send(ledgerToCsv(store.fullLedger()));
 });
 
+app.get('/api/approval-recovery', (_req, res) => {
+  res.json({ requests: db.prepare('SELECT * FROM spend_requests WHERE reconciliation_required=1').all(),
+    orphanedKeys: db.prepare('SELECT agent_id,key,created_at FROM idempotency_keys WHERE request_id IS NULL').all(),
+    audit: db.prepare('SELECT * FROM approval_recovery_audit ORDER BY seq DESC LIMIT 200').all() });
+});
+
 app.get('/api/approvals', (_req, res) => {
-  res.json({ pending: store.pendingApprovals(), recent: store.recentDecidedApprovals(20) });
+  expireStale();
+  res.json({ pending: store.pendingApprovals().map(approvalProjection), recent: store.recentDecidedApprovals(20).map(approvalProjection) });
 });
 
 // Mint (or fetch fresh) phone-decision links for a pending approval.
 // Bearer-protected: raw capability tokens must only go to the operator.
 app.get('/api/approvals/:id/links', (req, res) => {
+  expireStale();
   const approval = store.getApproval(req.params.id);
   if (!approval) return res.status(404).json({ error: 'Unknown approval.' });
   if (approval.status !== 'pending') return res.status(409).json({ error: 'Approval is no longer pending.' });
@@ -285,7 +297,8 @@ app.post('/mcp', requireAgent, async (req, res) => {
           .catch(() => undefined).finally(() => { res.end(); void transport.close(); });
       } else res.end();
     } });
-    const server = buildMcpServer(principal);
+    const connection = new AbortController();
+    const server = buildMcpServer(principal, connection.signal);
     const heartbeat = setInterval(() => {
       if (res.writableEnded) { clearInterval(heartbeat); return; }
       const ct = res.getHeader('content-type');
@@ -294,6 +307,7 @@ app.post('/mcp', requireAgent, async (req, res) => {
       }
     }, 20_000);
     res.on('close', () => {
+      connection.abort();
       activeMcp.delete(res);
       clearInterval(heartbeat);
       void transport.close();
@@ -313,6 +327,7 @@ app.delete('/mcp', (_req, res) => res.status(405).json({ error: 'Stateless MCP e
 app.get('/api/decide/:token', (req, res) => {
   const link = store.getApprovalLink(hashToken(req.params.token));
   if (!link) return res.status(404).json({ error: 'Unknown decision link.' });
+  expireStale();
   const approval = store.getApproval(link.approvalId);
   const now = new Date().toISOString();
   const state = link.usedAt ? 'used'
@@ -323,7 +338,7 @@ app.get('/api/decide/:token', (req, res) => {
     state,
     action: link.action,
     approval: approval
-      ? { id: approval.id, status: approval.status, rule: approval.rule, reason: approval.reason, intent: approval.intent, decidedBy: approval.decidedBy }
+      ? { id: approval.id, status: approval.status, rule: approval.rule, reason: approval.reason, intent: approval.intent, decidedBy: approval.decidedBy, expiresAt: approval.expiresAt, requestId: approval.intent.id }
       : null,
   });
 });

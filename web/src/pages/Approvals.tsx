@@ -49,6 +49,12 @@ export default function Approvals({ state }: { state: State }) {
                     {fmt(a.intent.amount, a.intent.currency)} <span className="text-paper">→</span> {a.intent.vendor}
                   </p>
                   <p className="text-sm text-paper mt-0.5">{a.reason}</p>
+                  {a.notification?.configured && ['retry', 'failed'].includes(a.notification.status ?? '') && (
+                    <p role="status" className="text-sm text-[#E0522A] mt-1">
+                      {t(a.notification.status === 'failed' ? 'notification.failed' : 'notification.retry')}
+                      {' · '}{a.notification.lastError}
+                    </p>
+                  )}
                   <Mono className="block mt-1.5">
                     {a.intent.agentId} · {a.intent.purpose} · rail {a.intent.rail}
                   </Mono>

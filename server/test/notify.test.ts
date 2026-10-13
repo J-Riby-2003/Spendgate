@@ -30,7 +30,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeAll(() => {
   store.upsertAgent(AGENT, 'Notify Test', 'GBP');
   store.upsertPolicy(POLICY);
-  fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => '' });
+  fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => '', json: async () => ({ ok: true }) });
   // notifier delegates to the current fetchMock so tests can re-stub freely
   const notifier = telegramNotifier({ botToken: 'B', chatId: 'C', baseUrl: 'https://gate.example', fetchImpl: (...args) => fetchMock(...args) });
   attachNotifier(onEvent, notifier);
@@ -147,7 +147,7 @@ describe('resolveNotifier', () => {
 it('does not log secret-bearing upstream errors when notification delivery fails', async () => {
   const logged: string[] = [];
   const capture = vi.spyOn(console, 'error').mockImplementation((...args) => { logged.push(args.map(String).join(' ')); });
-  attachNotifier(onEvent, { name: 'test', async send() { throw new Error('https://provider.example/secret-bearer-token'); } });
+  fetchMock.mockRejectedValueOnce(new Error('https://provider.example/secret-bearer-token'));
   const result = escalate('redacted notification error');
   try {
     await vi.waitFor(() => expect(logged.length).toBeGreaterThan(0));

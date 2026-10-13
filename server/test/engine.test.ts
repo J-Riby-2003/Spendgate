@@ -121,13 +121,13 @@ describe('submitSpend — idempotency', () => {
     expect(store.fullLedger().filter((e) => e.intentId === first.intent.id)).toHaveLength(1);
   });
 
-  it('rejects a duplicate key while its escalation is pending (409)', async () => {
+  it('resumes both blocking callers for a duplicate pending key', async () => {
     const p = spend({ amount: 25_000, idempotencyKey: 'idem-pending' });
     await new Promise((r) => setTimeout(r, 50));
-    await expect(spend({ amount: 25_000, idempotencyKey: 'idem-pending' })).rejects.toMatchObject({ status: 409 });
+    const retry = spend({ amount: 25_000, idempotencyKey: 'idem-pending' });
     const approval = store.pendingApprovals().at(-1)!;
     decide(approval.id, true, 'tester');
-    await p; // release the waiter so nothing dangles
+    expect(await retry).toEqual(await p);
   });
 
   it('rejects empty idempotency keys', async () => {

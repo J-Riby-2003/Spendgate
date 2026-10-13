@@ -31,10 +31,45 @@ it('rejects asynchronous callbacks and rolls back their synchronous writes', () 
 it('adds identity tables to an existing database without rewriting legacy ledger values', () => {
   const db = new DatabaseSync(':memory:');
   migrate(db, migrations.slice(0, 1));
-  db.exec("DELETE FROM schema_migrations; INSERT INTO ledger VALUES (42, '2020-01-01', 'intent', 'agent', 100, 'GBP', 'vendor', 'purpose', 'mcp', 'ALLOWED', 'rule', 'policy', NULL, 'GENESIS', 'legacy-hash', 'legacy-signature')");
-  const before = JSON.stringify(db.prepare('SELECT * FROM ledger').all());
+  db.exec("DELETE FROM schema_migrations; INSERT INTO ledger (seq,ts,intent_id,agent_id,amount,currency,vendor,purpose,rail,decision,rule,decided_by,approval_id,prev_hash,hash,signature) VALUES (42, '2020-01-01', 'intent', 'agent', 100, 'GBP', 'vendor', 'purpose', 'mcp', 'ALLOWED', 'rule', 'policy', NULL, 'GENESIS', 'legacy-hash', 'legacy-signature')");
+  const before = JSON.stringify(db.prepare('SELECT seq,ts,intent_id,agent_id,amount,currency,vendor,purpose,rail,decision,rule,decided_by,approval_id,prev_hash,hash,signature FROM ledger').all());
   migrate(db); migrate(db);
-  expect(JSON.stringify(db.prepare('SELECT * FROM ledger').all())).toBe(before);
+  expect(JSON.stringify(db.prepare('SELECT seq,ts,intent_id,agent_id,amount,currency,vendor,purpose,rail,decision,rule,decided_by,approval_id,prev_hash,hash,signature FROM ledger').all())).toBe(before);
   expect(db.prepare('SELECT id FROM operators').all()).toHaveLength(0);
+  db.close();
+});
+it('retains ambiguous legacy approvals and orphaned keys without inventing a final event', () => {
+  const db = new DatabaseSync(':memory:'); migrate(db, migrations.slice(0, 2));
+  const intent = JSON.stringify({ id: 'old-request', agentId: 'old-agent', amount: 10, currency: 'GBP', vendor: 'old', purpose: 'old', rail: 'mcp' });
+  db.prepare('INSERT INTO approvals VALUES (?,?,?,?,?,?,?,?,?)').run('old-approval', intent, 'old-rule', 'old-reason', 'approved', '2020-01-01T00:00:00.000Z', null, null, null);
+  db.prepare('INSERT INTO idempotency_keys VALUES (?,?,?,?,?,?)').run('old-agent', 'orphan', null, null, null, '2020-01-01T00:00:00.000Z');
+  migrate(db);
+  expect(db.prepare('SELECT reconciliation_required,ledger_seq FROM spend_requests').get()).toMatchObject({ reconciliation_required: 1, ledger_seq: null });
+  expect(db.prepare('SELECT decided_at,decided_by FROM approvals').get()).toMatchObject({ decided_at: null, decided_by: null });
+  expect(db.prepare('SELECT request_id FROM idempotency_keys').get()?.request_id).toBeNull();
+  expect(db.prepare('SELECT * FROM ledger').all()).toHaveLength(0);
+  expect(db.prepare("SELECT * FROM approval_recovery_audit WHERE event='reconciliation-required'").all()).toHaveLength(1);
+  db.close();
+});
+it('flags duplicate legacy ledger outcomes for one approval instead of failing migration or selecting a winner', () => {
+  const db = new DatabaseSync(':memory:'); migrate(db, migrations.slice(0, 2));
+  const intent = JSON.stringify({ id: 'duplicate-request', agentId: 'old-agent', amount: 10, currency: 'GBP', vendor: 'old', purpose: 'old', rail: 'mcp' });
+  db.prepare('INSERT INTO approvals VALUES (?,?,?,?,?,?,?,?,?)').run('duplicate-approval', intent, 'old-rule', 'old-reason', 'pending', '2020-01-01T00:00:00.000Z', null, null, null);
+  for (const [seq, id, decision] of [[1,'duplicate-request','APPROVED'], [2,'different-intent','EXPIRED']] as const) {
+    db.prepare('INSERT INTO ledger VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(seq, '2020-01-01', id, 'old-agent', 10, 'GBP', 'old', 'old', 'mcp', decision, 'rule', 'actor', 'duplicate-approval', 'GENESIS', 'original-hash', 'original-signature');
+  }
+  expect(() => migrate(db)).not.toThrow();
+  expect(db.prepare('SELECT reconciliation_required FROM spend_requests WHERE request_id=?').get('duplicate-request')?.reconciliation_required).toBe(1);
+  expect(db.prepare('SELECT hash FROM ledger').all().map(r => r.hash)).toEqual(['original-hash', 'original-hash']);
+  db.close();
+});
+it('preserves contradictory terminal metadata and flags it for audited reconciliation', () => {
+  const db = new DatabaseSync(':memory:'); migrate(db, migrations.slice(0, 5));
+  const intent = JSON.stringify({ id: 'conflict-request', agentId: 'agent', amount: 10, currency: 'GBP', vendor: 'old', purpose: 'old', rail: 'mcp' });
+  db.prepare('INSERT INTO approvals VALUES (?,?,?,?,?,?,?,?,?)').run('conflict-approval', intent, 'rule', 'reason', 'rejected', '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:01.000Z', 'rejector', 'rejection note');
+  db.prepare('INSERT INTO ledger VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(1, '2020-01-01T00:00:01.000Z', 'conflict-request', 'agent', 10, 'GBP', 'old', 'old', 'mcp', 'APPROVED', 'rule', 'human:approver', 'conflict-approval', 'GENESIS', 'hash', 'signature');
+  migrate(db);
+  expect(db.prepare('SELECT status,decided_by,note FROM approvals').get()).toMatchObject({ status: 'rejected', decided_by: 'rejector', note: 'rejection note' });
+  expect(db.prepare('SELECT reconciliation_required FROM spend_requests').get()?.reconciliation_required).toBe(1);
   db.close();
 });
