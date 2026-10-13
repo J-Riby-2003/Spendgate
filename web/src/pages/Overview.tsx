@@ -16,9 +16,9 @@ export default function Overview({ state }: { state: State }) {
 
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-10">
         <Stat label={t('stat.allowed')} value={String(stats.allowedToday)} tone="ok" />
-        <Stat label={t('stat.approved')} value={String(stats.approvedToday)} tone="gold" />
+        <Stat label={t('stat.approved')} value={String(stats.approvedToday)} tone="ok" />
         <Stat label={t('stat.denied')} value={String(stats.deniedToday)} tone="danger" />
-        <Stat label={t('stat.pending')} value={String(stats.pendingApprovals)} tone={stats.pendingApprovals > 0 ? 'gold' : undefined} />
+        <Stat label={t('stat.pending')} value={String(stats.pendingApprovals)} tone={stats.pendingApprovals > 0 ? 'pending' : undefined} />
       </div>
 
       <div className="flex items-baseline justify-between mb-3">
@@ -52,7 +52,7 @@ export default function Overview({ state }: { state: State }) {
           {state.ledger.length === 0 && (
             <tr>
               <td colSpan={6} className="px-4 py-8 text-center font-mono text-sm text-paper">
-                {t('empty.overview')} <code className="text-[#E8A020]">npm run demo</code>.
+                {t('empty.overview')} <code className="text-paper">npm run demo</code>.
               </td>
             </tr>
           )}

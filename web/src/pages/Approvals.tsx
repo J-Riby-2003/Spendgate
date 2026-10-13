@@ -57,7 +57,7 @@ export default function Approvals({ state }: { state: State }) {
                   <button
                     disabled={busy === a.id}
                     onClick={() => decide(a.id, true)}
-                    className="h-10 px-4 py-2 rounded-md bg-[#E8A020] text-bg font-mono text-[12px] tracking-[0.04em] hover:bg-[#F0B03A] transition-colors disabled:opacity-50"
+                    className="h-10 px-4 py-2 rounded-md bg-paper text-bg font-mono text-[12px] tracking-[0.04em] hover:bg-white transition-colors disabled:opacity-50"
                   >
                     {t('btn.approve')}
                   </button>

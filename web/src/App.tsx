@@ -118,7 +118,7 @@ export default function App() {
               onClick={() => { setPage(n.id); setMenuOpen(false); }}
               className={`w-full text-left pl-5 pr-4 py-2.5 flex items-center gap-2 border-l-2 transition-colors ${
                 page === n.id
-                  ? 'border-[#E8A020] text-paper bg-white/10'
+                  ? 'border-paper text-paper bg-white/10'
                   : 'border-transparent text-paper hover:text-paper'
               }`}
             >

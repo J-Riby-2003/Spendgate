@@ -9,10 +9,8 @@ export default {
         line: '#2E2B23',
         paper: '#F4F1E8',
         muted: '#8A8474',
-        gold: '#C8A96A',
-        golddim: '#8A7449',
-        danger: '#B4552D',
-        ok: '#7D8F5C',
+        danger: '#E0522A',
+        ok: '#4CAF50',
       },
       fontFamily: {
         display: ['Montserrat', 'sans-serif'],

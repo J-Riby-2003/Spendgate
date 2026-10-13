@@ -16,7 +16,7 @@ export function PageHeader({ title, sub, right }: { title: string; sub: string; 
 // tailwind.config change); white text per James's spec.
 const TONES: Record<string, string> = {
   ALLOWED: 'bg-[#4CAF50]',
-  APPROVED: 'bg-[#E8A020]',
+  APPROVED: 'bg-[#4CAF50]',
   DENIED: 'bg-[#E0522A]',
   REJECTED: 'bg-[#E0522A]',
   EXPIRED: 'bg-[#8A8474]',
@@ -38,8 +38,8 @@ export function Badge({ value }: { value: string }) {
   );
 }
 
-export function Stat({ label, value, tone }: { label: string; value: string; tone?: 'gold' | 'ok' | 'danger' }) {
-  const color = tone === 'gold' ? 'text-[#E8A020]' : tone === 'ok' ? 'text-[#4CAF50]' : tone === 'danger' ? 'text-[#E0522A]' : 'text-paper';
+export function Stat({ label, value, tone }: { label: string; value: string; tone?: 'pending' | 'ok' | 'danger' }) {
+  const color = tone === 'pending' ? 'text-[#E8A020]' : tone === 'ok' ? 'text-[#4CAF50]' : tone === 'danger' ? 'text-[#E0522A]' : 'text-paper';
   return (
     <div className="border border-line bg-black px-4 py-3 rounded-lg">
       <p className="font-mono text-[11px] tracking-[0.04em] text-paper mb-1">{label}</p>
