@@ -47,6 +47,8 @@ Unit tests run against a throwaway data dir; e2e starts a separate server on :18
 
 ## Connect a real agent
 
+For guided setup, sign in and choose **Set up an agent**. It creates the initial policy, delivers a scoped credential once, verifies a real MCP client connection and demonstrates decisions in safe simulation mode. Setup resumes after interruption; lost secrets require explicit rotation. Set `SPENDGATE_SEED_DEMO=false` for an empty deployment. See [agent onboarding](docs/agent-onboarding.md) for the journey, recovery and API contracts.
+
 Any MCP client (Claude Code, Claude Desktop, your own):
 
 ```json
@@ -108,3 +110,7 @@ Permission reserves funds; completed spend requires verified settlement. New age
 
 Revisit the bet if: Cloudflare/Coinbase ship cross-rail fiat policy before 100 paying teams;
 no 50 paying teams within 6 months of MVP; or agent payment volume is still microscopic by mid-2027.
+
+## Policy preview and audit history
+
+In Agents & Policy, test an unsaved policy against a sample or compare recent requests using their recorded original context. Preview and replay do not create production requests or reservations. Saves retain versioned before/after history attributed to the signed-in operator, and ledger details show the policy version and original decision context. See [policy simulation](docs/policy-simulation.md) for assumptions, API version requirements and migration behaviour.

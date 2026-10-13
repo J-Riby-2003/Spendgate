@@ -1,3 +1,4 @@
+import type { ApprovalDecisionContext } from '../../../shared/approval-context';
 import { CURRENCIES, currencyPrecision, isSupportedCurrency, parseMinor } from '../../../shared/currency';
 export { CURRENCIES };
 // Shared client types mirroring the server contract.
@@ -19,6 +20,7 @@ export interface AgentState {
   displayName: string;
   currency: string;
   policy: Policy | null;
+  policyVersion: number;
   spentToday: number;
   budget: BudgetSnapshot;
 }
@@ -43,6 +45,7 @@ export interface LedgerEntry {
 }
 
 export interface ApprovalRequest {
+  context?: ApprovalDecisionContext;
   id: string;
   requestId: string;
   expiresAt: string;
@@ -178,22 +181,31 @@ export async function fetchState(): Promise<State> {
   return res.json();
 }
 
-export async function decideApproval(id: string, approve: boolean, note?: string): Promise<void> {
+export class ApprovalDecisionError extends Error {
+  constructor(message: string, public approval: ApprovalRequest | null) { super(message); }
+}
+
+export async function decideApproval(id: string, approve: boolean, note?: string, overrideBudget = false): Promise<void> {
   const res = await fetch(`/api/approvals/${id}/decide`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ approve, note }),
+    body: JSON.stringify({ approve, note, overrideBudget }),
   });
+  if (!res.ok && (res.status === 409 || res.status === 422)) {
+    const body = await res.json();
+    throw new ApprovalDecisionError(body.error ?? 'Decision could not be recorded.', body.approval ?? null);
+  }
   await checkOk(res, 'decide');
 }
 
-export async function savePolicy(policy: Policy): Promise<void> {
+export async function savePolicy(policy: Policy, expectedVersion: number): Promise<number> {
   const res = await fetch(`/api/policies/${policy.agentId}`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(policy),
+    body: JSON.stringify({ ...policy, expectedVersion }),
   });
   await checkOk(res, 'save policy');
+  return (await res.json()).policyVersion;
 }
 
 export async function removeAgent(agentId: string): Promise<void> {
@@ -237,4 +249,51 @@ export async function revokeCredential(agentId: string, id: string): Promise<voi
 export async function recordActivity(): Promise<void> {
   const res = await fetch('/api/auth/activity', { method: 'POST', headers: authHeaders() });
   await checkOk(res, 'session activity');
+}
+
+export interface EvalResult { decision: 'ALLOW' | 'DENY' | 'ESCALATE'; rule: string; reason: string }
+export interface EvidenceContext { agentCurrency: string; budget: BudgetSnapshot; vendorKnown: boolean }
+export interface PolicyPreview { verdict: EvalResult; context: EvidenceContext; evaluatedAt: string; currentVersion: number; evaluatorVersion: string; assumptions: string }
+export interface PolicyReplay {
+  currentVersion: number; coverage: { selected: number; evaluated: number; unavailable: number };
+  changedOutcomes: number; changedReasons: number; transitions: Record<string, number>; assumptions: string;
+  rows: { requestId: string; original: EvalResult; current: EvalResult; proposed: EvalResult; evaluatedAt: string; policyVersion: number }[];
+  unavailable: { requestId: string; reason: string }[];
+}
+export interface PolicyRevision { agentId: string; version: number; changedAt: string; changedBy: string; source: string; before: Policy | null; after: Policy }
+export interface PolicyEvidence {
+  integrity: 'verified' | 'invalid' | 'unavailable'; digest: string | null;
+  envelope: { policyVersion: number; evaluatorVersion: string; evaluatedAt: string; context: EvidenceContext; verdict: EvalResult } | null;
+}
+async function policyPost<T>(agentId: string, action: string, body: unknown): Promise<T> {
+  const res = await fetch(`/api/policies/${encodeURIComponent(agentId)}/${action}`, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
+  await checkOk(res, action); return res.json();
+}
+export function previewPolicy(policy: Policy, sample: { amount: number; currency: string; vendor: string; purpose: string; rail: string }): Promise<PolicyPreview> {
+  return policyPost(policy.agentId, 'preview', { policy, sample });
+}
+export function replayPolicy(policy: Policy, expectedVersion: number, limit: number): Promise<PolicyReplay> {
+  return policyPost(policy.agentId, 'replay', { policy, expectedVersion, limit });
+}
+export async function fetchPolicyHistory(agentId: string): Promise<PolicyRevision[]> {
+  const res = await fetch(`/api/policies/${encodeURIComponent(agentId)}/history`); await checkOk(res, 'policy history'); return (await res.json()).revisions;
+}
+export async function fetchPolicyEvidence(requestId: string): Promise<PolicyEvidence> {
+  const res = await fetch(`/api/requests/${encodeURIComponent(requestId)}/evidence`); await checkOk(res, 'decision evidence'); return res.json();
+}
+
+export interface OnboardingDraft { agentId: string; displayName: string; currency: string; policy?: Policy }
+export interface OnboardingJourney {
+  id: string; revision: number; draft: Partial<OnboardingDraft>; agentId: string | null; agentExists: boolean;
+  credentialId: string | null; credentialActive: boolean; connectedAt: string | null; testedAt: string | null; completedAt: string | null; abandonedAt: string | null;
+}
+export interface OnboardingTests {
+  mode: 'simulation'; saved: PolicyPreview;
+  examples: { label: string; policy: Policy; sample: { amount: number; currency: string; vendor: string }; preview: PolicyPreview }[];
+  fixtureNotice: string; nextAction: string;
+}
+export async function onboardingRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  const res = await fetch(`/api/${path}`, { method, headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: body === undefined ? undefined : JSON.stringify(body) });
+  await checkOk(res, 'onboarding'); return res.json();
 }

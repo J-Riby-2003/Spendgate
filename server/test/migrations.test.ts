@@ -73,3 +73,15 @@ it('preserves contradictory terminal metadata and flags it for audited reconcili
   expect(db.prepare('SELECT reconciliation_required FROM spend_requests').get()?.reconciliation_required).toBe(1);
   db.close();
 });
+it('labels existing policies as migration baselines without inventing original actors/times or request evidence', () => {
+  const db = new DatabaseSync(':memory:'); migrate(db, migrations.filter(m => !m.id.startsWith('issue06_')));
+  const policy = { agentId: 'legacy-policy', allowedDays: '*', budgetMode: 'approval-override' };
+  db.prepare('INSERT INTO policies VALUES (?,?)').run(policy.agentId, JSON.stringify(policy));
+  const before = Date.now(); migrate(db); migrate(db);
+  const row = db.prepare('SELECT * FROM policy_revisions').get()!;
+  expect(row).toMatchObject({ agent_id: policy.agentId, version: 1, source: 'migration', changed_by: 'system:migration', before_json: null, after_json: JSON.stringify(policy) });
+  expect(Date.parse(String(row.changed_at))).toBeGreaterThanOrEqual(before);
+  expect(db.prepare('SELECT * FROM policy_revisions').all()).toHaveLength(1);
+  expect(db.prepare('SELECT * FROM policy_evidence').all()).toHaveLength(0);
+  db.close();
+});

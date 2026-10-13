@@ -1,3 +1,4 @@
+import PolicyTools from '../components/PolicyTools';
 import BudgetReconciliation from '../components/BudgetReconciliation';
 import Credentials from '../components/Credentials';
 import { useState } from 'react';
@@ -27,6 +28,7 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
   };
   const [form, setForm] = useState(initialForm);
   const [baseline, setBaseline] = useState(initialForm);
+  const [version, setVersion] = useState(agent.policyVersion);
   const dirty = JSON.stringify(form) !== JSON.stringify(baseline);
   const [error, setError] = useState<string | null>(null);
   const [confirmSave, setConfirmSave] = useState(false);
@@ -38,7 +40,7 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
     setForm((f) => ({ ...f, ...patch }));
   };
 
-  async function save(): Promise<boolean> {
+  function draft(): Policy | null {
     setError(null);
     const parseAmt = (raw: string, label: string): number | null | false => {
       if (raw.trim() === '') return null;
@@ -50,20 +52,20 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
       return v;
     };
     const maxPerTxn = parseAmt(form.maxPerTxn, 'Auto-approve ceiling');
-    if (maxPerTxn === false) return false;
+    if (maxPerTxn === false) return null;
     const dailyBudget = parseAmt(form.dailyBudget, 'Daily budget');
-    if (dailyBudget === false) return false;
+    if (dailyBudget === false) return null;
     const approvalThreshold = parseAmt(form.approvalThreshold, 'Human-approval threshold');
-    if (approvalThreshold === false) return false;
+    if (approvalThreshold === false) return null;
 
     const blocked = [...new Set(form.blocked.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))];
     if (blocked.some((v) => v.length > 120)) {
       setError('Blocked vendors: each entry must be 120 characters or fewer.');
-      return false;
+      return null;
     }
     if (blocked.length > 200) {
       setError('Blocked vendors: at most 200 entries.');
-      return false;
+      return null;
     }
     const policy: Policy = {
       agentId: agent.agentId,
@@ -77,14 +79,18 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
       allowedDays: form.days.length === 7 ? '*' : form.days,
       allowedWindow: form.windowEnabled ? { start: form.windowStart, end: form.windowEnd } : null,
     };
+    return policy;
+  }
+
+  async function save(): Promise<boolean> {
+    const policy = draft();
+    if (!policy) return false;
     try {
-      await savePolicy(policy);
+      const savedVersion = await savePolicy(policy, version);
+      setVersion(savedVersion);
       setBaseline({ ...form });
       return true;
-    } catch (err) {
-      setError(String(err));
-      return false;
-    }
+    } catch (err) { setError(String(err)); return false; }
   }
 
   const budget = agent.policy?.dailyBudget ?? null;
@@ -95,9 +101,13 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
     <section aria-label={`Policy for ${agent.agentId}`} className="border border-line bg-black rounded-lg p-6 mb-6">
       <div className="flex items-baseline justify-between mb-1">
         <h2 className="font-body text-[15px] font-medium text-paper">{agent.displayName}</h2>
-        <Mono>{agent.agentId}</Mono>
+        <Mono>{agent.agentId} · Policy version {agent.policyVersion}</Mono>
       </div>
 
+      {version !== agent.policyVersion && <div role="status" className="border border-line p-3 my-4 text-sm">
+        Policy changed elsewhere. Your draft is preserved.
+        <button className="underline ml-3" onClick={() => { setForm(initialForm); setBaseline(initialForm); setVersion(agent.policyVersion); setError(null); }}>Reload current policy</button>
+      </div>}
       <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 mb-3">
         <div><dt className="font-mono text-[11px]">Completed spend</dt><dd data-testid="budget-spent" className="font-mono text-sm">{fmt(balances.spentMinor, agent.currency)}</dd></div>
         <div><dt className="font-mono text-[11px]">Reserved</dt><dd data-testid="budget-reserved" className="font-mono text-sm">{fmt(balances.reservedMinor, agent.currency)}</dd></div>
@@ -135,8 +145,9 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mt-5">
         <div>
-          <label className="font-mono text-[12px] tracking-[0.04em] text-paper block mb-2">{t('label.blockedVendors')}</label>
+          <label htmlFor={`blocked-${agent.agentId}`} className="font-mono text-[12px] tracking-[0.04em] text-paper block mb-2">{t('label.blockedVendors')}</label>
           <input
+            id={`blocked-${agent.agentId}`}
             value={form.blocked}
             onChange={(e) => set({ blocked: e.target.value })}
             placeholder="bobs-discount-emporium, sketchy-cdn"
@@ -233,6 +244,7 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
         {error && !confirmSave && <Mono className="text-[#E0522A]">{error}</Mono>}
       </div>
 
+      <PolicyTools agent={agent} draft={draft} draftKey={JSON.stringify(form)} expectedVersion={version} />
       <Credentials agentId={agent.agentId} />
 
       {confirmSave && (

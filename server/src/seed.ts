@@ -57,7 +57,7 @@ export function seed(): void {
   for (const s of SEED) {
     if (!store.listAgents().some(a => a.agentId === s.agentId)) store.upsertAgent(s.agentId, s.displayName, s.currency);
     if (!store.getPolicy(s.agentId)) {
-      store.upsertPolicy({ agentId: s.agentId, ...s.policy });
+      store.upsertPolicy({ agentId: s.agentId, ...s.policy }, { changedBy: 'system:seed', source: 'seed' });
     }
   }
 }

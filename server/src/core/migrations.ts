@@ -177,7 +177,42 @@ CREATE TABLE login_attempts (key TEXT PRIMARY KEY, failures INTEGER NOT NULL, re
         .run('orphaned-idempotency-claim', JSON.stringify({ agentId: row.agent_id, key: row.key, createdAt: row.created_at }));
     }
   } },
+  { id: 'issue06_001_policy_history_evidence', up(db) {
+    db.exec(`
+      CREATE TABLE policy_revisions (
+        agent_id TEXT NOT NULL, version INTEGER NOT NULL, changed_at TEXT NOT NULL,
+        changed_by TEXT NOT NULL, source TEXT NOT NULL, before_json TEXT, after_json TEXT NOT NULL,
+        PRIMARY KEY (agent_id, version)
+      );
+      CREATE TRIGGER policy_revisions_no_update BEFORE UPDATE ON policy_revisions
+        BEGIN SELECT RAISE(ABORT, 'Policy revision history is immutable'); END;
+      CREATE TRIGGER policy_revisions_no_delete BEFORE DELETE ON policy_revisions
+        BEGIN SELECT RAISE(ABORT, 'Policy revision history is immutable'); END;
+      CREATE TABLE policy_evidence (
+        request_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL,
+        digest TEXT NOT NULL, envelope_json TEXT NOT NULL
+      );
+    `);
+    const timestamp = new Date().toISOString();
+    for (const row of db.prepare('SELECT agent_id,json FROM policies').all()) {
+      db.prepare('INSERT INTO policy_revisions VALUES (?,1,?,?,?,NULL,?)')
+        .run(row.agent_id, timestamp, 'system:migration', 'migration', row.json);
+    }
+  } },
 
+  { id: 'issue05_001_onboarding', up(db) { db.exec(`
+    CREATE TABLE onboarding_sessions (
+      id TEXT PRIMARY KEY, operator_id TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+      draft_json TEXT NOT NULL DEFAULT '{}', agent_id TEXT, setup_json TEXT, credential_id TEXT, agent_policy_version INTEGER,
+      connected_at TEXT, tested_at TEXT, completed_at TEXT, abandoned_at TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX idx_onboarding_active ON onboarding_sessions(operator_id) WHERE completed_at IS NULL AND abandoned_at IS NULL;
+    CREATE TABLE onboarding_challenges (
+      token_hash TEXT PRIMARY KEY, onboarding_id TEXT NOT NULL, agent_id TEXT NOT NULL,
+      credential_id TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER
+    );
+  `); } },
 ];
 
 /** Append immutable, uniquely named migrations; never renumber deployed IDs. */

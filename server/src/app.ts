@@ -7,18 +7,24 @@ import { join } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { seed } from './seed.js';
+import { registerAgent } from './core/agents.js';
+import { startJourney, listJourneys, ownedJourney, journeyView, saveDraft, abandonJourney, OnboardingError } from './core/onboarding-store.js';
+import { createChallenge, testJourney, completeJourney } from './core/onboarding.js';
 import { buildMcpServer } from './mcp.js';
-import { decide, expireStale, onEvent, emit, EngineError } from './core/engine.js';
-import { cleanHhmm, cleanMinor, cleanStr, cleanVendorList, InputError } from './core/sanitize.js';
+import { finaliseApproval, expireStale, onEvent, emit, EngineError } from './core/engine.js';
+import { cleanStr, InputError } from './core/sanitize.js';
 import { store, db, withImmediateTransaction } from './core/store.js';
 import { verifyLedger, ledgerToCsv } from './core/ledger.js';
 import { requireOperator, requireAgent, requireCsrf, requireOrigin, allowedOrigin, sessionToken, authenticateSession, assertAgentActive, authEvents, login, logout, csrfToken, SESSION_COOKIE, cookieOptions, AuthError, issueCredential, listCredentials, rotateCredential, revokeCredential, deleteAgentWithCredentials, type OperatorPrincipal } from './auth.js';
 import { mintDecisionLinks, decideByToken, hashToken } from './decide-links.js';
 import { attachNotifier, resolveNotifier, notificationStatus } from './notify.js';
 import { budget } from './core/budget-state.js';
+import { approvalQueueContext, getApprovalContext } from './core/approval-context.js';
 import { BudgetError, type ReconcileInput } from './core/budget.js';
 import { isSupportedCurrency } from '../../shared/currency.js';
-import type { Policy } from './core/types.js';
+import { parsePolicy } from './core/policy-input.js';
+import { PolicyConflict } from './core/policy-history.js';
+import { preview, replay, requestEvidence, requireVersion } from './core/simulation.js';
 
 export function createApplication() {
 const app = express();
@@ -26,7 +32,7 @@ app.use((_req, res, next) => { res.setHeader('Referrer-Policy', 'no-referrer'); 
 app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 app.use(express.json({ limit: '256kb' }));
 
-seed();
+if (process.env.SPENDGATE_SEED_DEMO !== 'false') seed();
 expireStale(); // reconcile overdue durable requests before accepting traffic or delivering links
 
 // push a decision-link pair to Telegram (if configured) for every new escalation
@@ -38,9 +44,11 @@ function approvalProjection(a: ReturnType<typeof store.pendingApprovals>[number]
   return { ...a, requestId: a.intent.id, notification: { ...notificationStatus(a.id), configured: notifier !== null } };
 }
 function buildState() {
+  const approvals = approvalQueueContext();
   const agents = store.listAgents().map((a) => ({
     ...a,
     policy: store.getPolicy(a.agentId),
+    policyVersion: store.getPolicyVersion(a.agentId),
     spentToday: budget.getBudgetSnapshot(a.agentId).spentMinor,
     budget: budget.getBudgetSnapshot(a.agentId),
   }));
@@ -50,8 +58,8 @@ function buildState() {
   return {
     agents,
     ledger: store.recentLedger(50),
-    approvalsPending: store.pendingApprovals().map(approvalProjection),
-    approvalsRecent: store.recentDecidedApprovals(20).map(approvalProjection),
+    approvalsPending: approvals.pending.map(approvalProjection),
+    approvalsRecent: approvals.recent.map(approvalProjection),
     stats: {
       allowedToday: allToday.filter((e) => e.decision === 'ALLOWED').length,
       approvedToday: allToday.filter((e) => e.decision === 'APPROVED').length,
@@ -99,10 +107,12 @@ app.get('/api/security-audit', (_req, res) => {
 });
 app.get('/api/agents/:agentId/credentials', (req, res) => res.json(listCredentials(req.params.agentId)));
 app.post('/api/agents/:agentId/credentials', (req, res) => {
-  res.status(201).json(issueCredential(req.params.agentId, (res.locals.principal as OperatorPrincipal).operatorId));
+  const operatorId = (res.locals.principal as OperatorPrincipal).operatorId;
+  res.status(201).json(req.body?.onboardingId === undefined ? issueCredential(req.params.agentId, operatorId) : issueCredential(req.params.agentId, operatorId, req.body.onboardingId));
 });
 app.post('/api/agents/:agentId/credentials/:credentialId/rotate', (req, res) => {
-  res.status(201).json(rotateCredential(req.params.agentId, req.params.credentialId, (res.locals.principal as OperatorPrincipal).operatorId));
+  const operatorId = (res.locals.principal as OperatorPrincipal).operatorId;
+  res.status(201).json(req.body?.onboardingId === undefined ? rotateCredential(req.params.agentId, req.params.credentialId, operatorId) : rotateCredential(req.params.agentId, req.params.credentialId, operatorId, req.body.onboardingId));
 });
 app.delete('/api/agents/:agentId/credentials/:credentialId', (req, res) => {
   revokeCredential(req.params.agentId, req.params.credentialId, (res.locals.principal as OperatorPrincipal).operatorId);
@@ -139,7 +149,15 @@ app.get('/api/approval-recovery', (_req, res) => {
 
 app.get('/api/approvals', (_req, res) => {
   expireStale();
-  res.json({ pending: store.pendingApprovals().map(approvalProjection), recent: store.recentDecidedApprovals(20).map(approvalProjection) });
+  const approvals = approvalQueueContext();
+  res.json({ pending: approvals.pending.map(approvalProjection), recent: approvals.recent.map(approvalProjection) });
+});
+
+app.get('/api/approvals/:id/context', (req, res) => {
+  expireStale();
+  const approval = getApprovalContext(req.params.id);
+  if (!approval) return res.status(404).json({ error: 'Unknown approval.' });
+  res.json(approvalProjection(approval));
 });
 
 // Mint (or fetch fresh) phone-decision links for a pending approval.
@@ -158,56 +176,48 @@ app.post('/api/approvals/:id/decide', (req, res) => {
     if (typeof approve !== 'boolean') return res.status(422).json({ error: 'approve (boolean) is required' });
     const by = (res.locals.principal as OperatorPrincipal).operatorId;
     const note = cleanStr(req.body?.note, 'note', 500, true) ?? undefined;
-    const ok = decide(req.params.id, approve, by, note);
-    if (!ok) return res.status(409).json({ error: 'Approval is no longer pending (already decided or expired).' });
-    res.json({ ok: true });
+    if (req.body?.overrideBudget !== undefined && typeof req.body.overrideBudget !== 'boolean') return res.status(422).json({ error: 'overrideBudget must be a boolean.' });
+    const outcome = finaliseApproval(req.params.id, approve ? 'approve' : 'reject', { kind: 'operator', id: by }, note, undefined, { allowBudgetOverride: req.body?.overrideBudget === true });
+    if (!outcome.changed || outcome.status !== (approve ? 'approved' : 'rejected')) return res.status(409).json({ code: 'approval-not-pending', error: 'Approval is no longer pending (already decided or expired).', approval: getApprovalContext(req.params.id) });
+    res.json({ ok: true, approval: getApprovalContext(req.params.id) });
   } catch (err) {
+    if (err instanceof BudgetError) return res.status(err.status).json({ code: 'approval-budget-conflict', error: err.message, approval: getApprovalContext(req.params.id) });
     if (err instanceof InputError) return res.status(422).json({ error: err.message });
     throw err;
   }
 });
 
 app.get('/api/policies', (_req, res) => {
-  res.json(store.listAgents().map((a) => ({ agentId: a.agentId, policy: store.getPolicy(a.agentId) })));
+  res.json(store.listAgents().map((a) => ({ agentId: a.agentId, policy: store.getPolicy(a.agentId), policyVersion: store.getPolicyVersion(a.agentId) })));
 });
 
+app.get('/api/policies/:agentId/history', (req, res) => {
+  if (!store.getPolicy(req.params.agentId)) throw new BudgetError('Unknown agent.', 404);
+  const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new InputError('History limit must be 1 to 200.');
+  res.json({ revisions: store.policyHistory(req.params.agentId, limit) });
+});
+app.post('/api/policies/:agentId/preview', (req, res) => {
+  res.json(preview(req.params.agentId, req.body?.policy, req.body?.sample));
+});
+app.post('/api/policies/:agentId/replay', (req, res) => {
+  res.json(replay(req.params.agentId, req.body?.policy, req.body?.expectedVersion, req.body?.limit === undefined ? 50 : req.body.limit));
+});
+app.get('/api/requests/:requestId/evidence', (req, res) => {
+  if (!db.prepare('SELECT 1 FROM spend_requests WHERE request_id=?').get(req.params.requestId)) throw new BudgetError('Unknown request.', 404);
+  res.json(requestEvidence(req.params.requestId) ?? { integrity: 'unavailable', digest: null, envelope: null });
+});
 app.put('/api/policies/:agentId', (req, res) => {
-  try {
-    const agentId = req.params.agentId;
-    if (!store.listAgents().some((a) => a.agentId === agentId)) {
-      return res.status(404).json({ error: `Unknown agent "${agentId}".` });
-    }
-    const b = req.body ?? {};
-    const allowedVendors = b.allowedVendors === undefined || b.allowedVendors === '*' ? '*' : cleanVendorList(b.allowedVendors, 'allowedVendors');
-    const blockedVendors = b.blockedVendors == null ? [] : cleanVendorList(b.blockedVendors, 'blockedVendors');
-    const allowedDays = b.allowedDays ?? '*';
-    if (allowedDays !== '*' && !(Array.isArray(allowedDays) && allowedDays.length <= 7 && allowedDays.every((d) => Number.isInteger(d) && d >= 0 && d <= 6))) {
-      throw new InputError('allowedDays must be "*" or a list of weekday indices 0–6 (0 = Sunday).');
-    }
-    const mode = b.budgetMode ?? store.getPolicy(agentId)?.budgetMode ?? 'hard-stop';
-    if (mode !== 'hard-stop' && mode !== 'approval-override') throw new InputError('Invalid budget mode.');
-    const policy: Policy = {
-      agentId,
-      maxPerTxn: cleanMinor(b.maxPerTxn, 'maxPerTxn'),
-      dailyBudget: cleanMinor(b.dailyBudget, 'dailyBudget'),
-      budgetMode: mode,
-      approvalThreshold: cleanMinor(b.approvalThreshold, 'approvalThreshold'),
-      allowedVendors,
-      blockedVendors,
-      newVendorRequiresApproval: Boolean(b.newVendorRequiresApproval),
-      allowedDays,
-      allowedWindow: b.allowedWindow == null ? null : {
-        start: cleanHhmm(b.allowedWindow.start, 'Window start'),
-        end: cleanHhmm(b.allowedWindow.end, 'Window end'),
-      },
-    };
-    withImmediateTransaction(() => store.upsertPolicy(policy));
-    emit({ type: 'state' });
-    res.json({ ok: true, policy });
-  } catch (err) {
-    if (err instanceof InputError) return res.status(422).json({ error: err.message });
-    throw err;
-  }
+  const expectedVersion = requireVersion(req.body?.expectedVersion);
+  const result = withImmediateTransaction(() => {
+    const current = store.getPolicy(req.params.agentId);
+    if (!current) throw new BudgetError('Unknown agent.', 404);
+    const policy = parsePolicy(req.params.agentId, req.body, current.budgetMode);
+    const policyVersion = store.upsertPolicy(policy, { expectedVersion, changedBy: (res.locals.principal as OperatorPrincipal).operatorId, source: 'operator' });
+    return { policy, policyVersion };
+  });
+  emit({ type: 'state' });
+  res.json({ ok: true, ...result });
 });
 
 app.delete('/api/agents/:agentId', (req, res) => {
@@ -232,38 +242,19 @@ app.patch('/api/agents/:agentId/currency', (req, res) => {
 });
 
 app.post('/api/agents', (req, res) => {
-  try {
-    const { agentId, currency } = req.body ?? {};
-    if (typeof agentId !== 'string' || !/^[a-z0-9-]{2,64}$/.test(agentId)) {
-      return res.status(422).json({ error: 'agentId must be 2–64 chars of a-z, 0-9, dash.' });
-    }
-    if (store.listAgents().some((a) => a.agentId === agentId)) {
-      return res.status(409).json({ error: 'Agent already exists.' });
-    }
-    const displayName = cleanStr(req.body?.displayName, 'displayName', 80, true) ?? agentId;
-    const cur = typeof currency === 'string' ? currency.toUpperCase() : currency == null ? 'GBP' : '';
-    if (!isSupportedCurrency(cur)) throw new InputError('Unsupported currency.');
-    withImmediateTransaction(() => {
-    store.upsertAgent(agentId, displayName, cur);
-    store.upsertPolicy({
-      agentId,
-      maxPerTxn: 5000,
-      dailyBudget: 50000, budgetMode: 'hard-stop',
-      approvalThreshold: 20000,
-      allowedVendors: '*',
-      blockedVendors: [],
-      newVendorRequiresApproval: true,
-      allowedDays: '*',
-      allowedWindow: null,
-    });
-    });
-    emit({ type: 'state' });
-    res.status(201).json({ ok: true });
-  } catch (err) {
-    if (err instanceof InputError) return res.status(422).json({ error: err.message });
-    throw err;
-  }
+  const result = registerAgent(req.body ?? {}, (res.locals.principal as OperatorPrincipal).operatorId);
+  emit({ type: 'state' });
+  res.status(result.created ? 201 : 200).json({ ok: true, ...result });
 });
+
+app.get('/api/onboarding', (_req, res) => res.json(listJourneys((res.locals.principal as OperatorPrincipal).operatorId)));
+app.post('/api/onboarding', (req, res) => res.json(startJourney((res.locals.principal as OperatorPrincipal).operatorId, req.body?.requestId)));
+app.get('/api/onboarding/:id', (req, res) => res.json(journeyView(ownedJourney(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId))));
+app.patch('/api/onboarding/:id', (req, res) => res.json(saveDraft(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId, req.body?.expectedRevision, req.body?.draft)));
+app.post('/api/onboarding/:id/challenge', (req, res) => res.json(createChallenge(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId)));
+app.post('/api/onboarding/:id/test', (req, res) => res.json(testJourney(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId, req.body?.sample)));
+app.post('/api/onboarding/:id/abandon', (req, res) => res.json(abandonJourney(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId)));
+app.post('/api/onboarding/:id/complete', (req, res) => res.json(completeJourney(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId)));
 
 // Operator-only preview and evidence-backed recovery; no generic operator payment-completion API.
 app.get('/api/agents/:agentId/budget/reconciliation', (req, res) => {
@@ -361,6 +352,8 @@ app.post('/api/decide/:token', (req, res) => {
 
 // error handler
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err instanceof OnboardingError) return res.status(err.status).json({ error: err.message });
+  if (err instanceof PolicyConflict) return res.status(err.status).json({ error: err.message });
   if (err instanceof BudgetError) return res.status(err.status).json({ error: err.message });
   if (err instanceof AuthError) return res.status(err.status).json({ error: err.message });
   if (err instanceof EngineError) return res.status(err.status).json({ error: err.message });

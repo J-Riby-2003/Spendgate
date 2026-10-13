@@ -4,8 +4,8 @@ import type { ApprovalRequest, LedgerDecision, Rail, SpendIntent, DecisionDetail
 import { store, db, withImmediateTransaction } from './store.js';
 import { budget } from './budget-state.js';
 import { BudgetError } from './budget.js';
-import { isSupportedCurrency } from '../../../shared/currency.js';
-import { evaluate } from './policy.js';
+import { parseIntent, intentDigest } from './policy-input.js';
+import { encodeEvidence, evaluateContext, EVALUATOR_VERSION, type EvidenceContext } from './policy-evidence.js';
 import { appendLedger } from './ledger.js';
 import { cleanStr } from './sanitize.js';
 
@@ -38,11 +38,6 @@ export interface SpendInput {
   idempotencyKey?: string;
 }
 export type EvidenceReference = { schemaVersion: number; digest: string };
-function validateEvidence(evidence?: EvidenceReference): EvidenceReference | null {
-  if (!evidence) return null;
-  if (!Number.isSafeInteger(evidence.schemaVersion) || evidence.schemaVersion < 1 || !/^[a-f0-9]{64}$/.test(evidence.digest)) throw new EngineError('Invalid evidence reference.', 422);
-  return { schemaVersion: evidence.schemaVersion, digest: evidence.digest };
-}
 function details(actor: DecisionDetails['actor'], note: string | null, evidence: EvidenceReference | null, budgetRecheck: DecisionDetails['budgetRecheck'] = null): DecisionDetails {
   return { actor, note, evidence, budgetRecheck };
 }
@@ -73,18 +68,14 @@ function reserveIntent(intent: SpendIntent, now: Date, override?: { operatorId: 
   budget.reserveBudget({ requestId: intent.id, agentId: intent.agentId, amountMinor: intent.amount,
     currency: intent.currency, expiresAt: new Date(now.getTime() + AUTHORISATION_TTL_MS).toISOString(), override }, now);
 }
-/** Synchronous durable submission. Evidence is a trusted #6 hook, absent from agent-facing schemas. */
+/** Synchronous submission: policy, context, evidence, reservation and outcome share one transaction. */
 export function submitRequest(input: SpendInput, options: { evidence?: EvidenceReference } = {}): RequestSnapshot {
   const agent = store.listAgents().find(a => a.agentId === input.agentId);
   if (!agent) throw new EngineError(`Unknown agent "${input.agentId}". Register it in the console first.`, 404);
-  if (!Number.isInteger(input.amount) || input.amount <= 0) throw new EngineError('amount must be a positive integer in minor units (pence/cents).', 422);
-  if (input.amount > 1e12) throw new EngineError('amount exceeds the maximum of 10,000,000,000.00.', 422);
-  const vendor = cleanStr(input.vendor, 'vendor', 120)!;
-  const purpose = cleanStr(input.purpose, 'purpose', 280)!;
-  const currency = typeof input.currency === 'string' ? input.currency.toUpperCase() : '';
-  if (!isSupportedCurrency(currency)) throw new EngineError('Unsupported currency.', 422);
+  const normalised = parseIntent(input.agentId, input, 'pending');
+  const { vendor, purpose, currency } = normalised;
   const key = input.idempotencyKey == null ? null : cleanStr(input.idempotencyKey, 'idempotencyKey', 128)!;
-  const evidence = validateEvidence(options.evidence);
+  if (options.evidence !== undefined) throw new EngineError('Caller-supplied evidence is not accepted; evidence is constructed within submission.', 422);
   const fingerprint = createHash('sha256').update(JSON.stringify([input.agentId, input.amount, currency, vendor, purpose, input.rail])).digest('hex');
   const result = withImmediateTransaction(() => {
     if (key) {
@@ -103,14 +94,21 @@ export function submitRequest(input: SpendInput, options: { evidence?: EvidenceR
     }
     if (db.prepare('SELECT request_id FROM spend_requests WHERE agent_id=? AND reconciliation_required=1 LIMIT 1').get(input.agentId)) throw new EngineError('Legacy requests require audited reconciliation before new authorisation.', 409);
     // Replay precedes mutable policy/currency checks so a retry can still recover its original result.
-    if (currency !== agent.currency) throw new EngineError('Request currency must match the configured agent currency.', 422);
+    const transactionAgent = store.listAgents().find(a => a.agentId === input.agentId);
+    if (!transactionAgent) throw new EngineError('Unknown agent.', 404);
+    if (currency !== transactionAgent.currency) throw new EngineError('Request currency must match the configured agent currency.', 422);
     const policy = store.getPolicy(input.agentId);
     if (!policy) throw new EngineError(`No policy for agent "${input.agentId}".`, 409);
     const now = new Date();
     const intent: SpendIntent = { id: randomUUID(), agentId: input.agentId, amount: input.amount, currency, vendor, purpose, rail: input.rail };
     const snapshot = budget.getBudgetSnapshot(input.agentId, now);
     if (snapshot.reconciliationRequired) throw new BudgetError('Legacy obligations require operator reconciliation before authorisation.');
-    const verdict = evaluate(policy, intent, { spentTodayMinor: snapshot.spentMinor, reservedMinor: snapshot.reservedMinor, knownVendors: store.knownVendors(input.agentId), now });
+    const context: EvidenceContext = { agentCurrency: snapshot.currency, budget: snapshot, vendorKnown: store.knownVendors(input.agentId).has(vendor.toLowerCase()) };
+    const verdict = evaluateContext(policy, intent, context, now);
+    const encoded = encodeEvidence({ schemaVersion: 1, intentDigest: intentDigest(intent), policyVersion: store.getPolicyVersion(input.agentId), evaluatorVersion: EVALUATOR_VERSION,
+      evaluatedAt: now.toISOString(), context, verdict });
+    const evidence: EvidenceReference = { schemaVersion: 1, digest: encoded.digest };
+    db.prepare('INSERT INTO policy_evidence (request_id,schema_version,digest,envelope_json) VALUES (?,1,?,?)').run(intent.id, encoded.digest, encoded.json);
     db.prepare('INSERT INTO spend_requests (request_id,agent_id,intent_json,reason,evidence_json) VALUES (?,?,?,?,?)')
       .run(intent.id, intent.agentId, JSON.stringify(intent), verdict.reason, evidence ? JSON.stringify(evidence) : null);
     if (key) db.prepare('INSERT INTO idempotency_keys (agent_id,key,created_at,request_id,fingerprint,reason) VALUES (?,?,?,?,?,?)')
@@ -141,7 +139,7 @@ function broadcast(result: RequestSnapshot): void {
 export interface FinalisationResult { changed: boolean; requestId: string | null; status: ApprovalRequest['status'] | null }
 export type DecisionActor = DecisionDetails['actor'];
 /** All writes, including capability consumption, share one BEGIN IMMEDIATE boundary. */
-export function finaliseApproval(approvalId: string, action: 'approve' | 'reject' | 'expire', actor: DecisionActor, note?: string, tokenHash?: string): FinalisationResult {
+export function finaliseApproval(approvalId: string, action: 'approve' | 'reject' | 'expire', actor: DecisionActor, note?: string, tokenHash?: string, options?: { allowBudgetOverride: boolean }): FinalisationResult {
   const result = withImmediateTransaction<FinalisationResult>(() => {
     const approval = store.getApproval(approvalId);
     if (!approval) return { changed: false, requestId: null, status: null };
@@ -166,8 +164,9 @@ export function finaliseApproval(approvalId: string, action: 'approve' | 'reject
       const over = snapshot.remainingMinor != null && approval.intent.amount > snapshot.remainingMinor;
       if (over && finalActor.kind !== 'operator') throw new BudgetError('Budget overrides require an authenticated console operator.');
       if (over && snapshot.mode === 'approval-override' && !finalNote?.trim()) throw new BudgetError('An explicit override reason is required.', 422);
+      if (over && snapshot.mode === 'approval-override' && options?.allowBudgetOverride !== true) throw new BudgetError('Budget changed. Review and explicitly approve the budget override.');
       reserveIntent(approval.intent, now, over ? { operatorId: finalActor.id!, reason: finalNote ?? '' } : undefined);
-      recheck = { reservedMinor: snapshot.reservedMinor, remainingMinor: snapshot.remainingMinor, overrideReason: over ? finalNote : null };
+      recheck = { reservedMinor: snapshot.reservedMinor, remainingMinor: snapshot.remainingMinor, overrideReason: over ? finalNote : null, overrideConsent: over && options?.allowBudgetOverride === true };
     } else {
       // Pending requests normally have no hold. Never release an already-final execution reservation.
       const reservation = budget.getReservation(approval.intent.id);
@@ -191,7 +190,7 @@ export function finaliseApproval(approvalId: string, action: 'approve' | 'reject
   return result;
 }
 export function decide(approvalId: string, approve: boolean, by: string, note?: string): boolean {
-  const result = finaliseApproval(approvalId, approve ? 'approve' : 'reject', by === 'decision-link' ? { kind: 'decision-link', id: null } : { kind: 'operator', id: by }, note);
+  const result = finaliseApproval(approvalId, approve ? 'approve' : 'reject', by === 'decision-link' ? { kind: 'decision-link', id: null } : { kind: 'operator', id: by }, note, undefined, { allowBudgetOverride: by !== 'decision-link' && Boolean(note?.trim()) });
   return result.changed && result.status === (approve ? 'approved' : 'rejected');
 }
 export function expireStale(): void {
