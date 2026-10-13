@@ -1,3 +1,4 @@
+import DecisionEvidence from '../components/DecisionEvidence';
 import { useState } from 'react';
 import { fmt, type LedgerEntry, type State } from '../lib/api';
 import { Badge, clock, Mono, PageHeader } from '../components/ui';
@@ -21,6 +22,7 @@ function EntryDetail({ e, leaving }: { e: LedgerEntry; leaving: boolean }) {
             <Mono>decided by: {e.decidedBy}</Mono>
             <Mono>purpose: {e.purpose}</Mono>
             <Mono>approval: {e.approvalId ?? '—'}</Mono>
+            <DecisionEvidence requestId={e.intentId} />
             <Mono className="col-span-2 break-all">prev hash: {e.prevHash}</Mono>
             <Mono className="col-span-2 break-all text-paper">hash: {e.hash}</Mono>
             <Mono className="col-span-2 break-all">signature: {e.signature}</Mono>

@@ -177,6 +177,28 @@ CREATE TABLE login_attempts (key TEXT PRIMARY KEY, failures INTEGER NOT NULL, re
         .run('orphaned-idempotency-claim', JSON.stringify({ agentId: row.agent_id, key: row.key, createdAt: row.created_at }));
     }
   } },
+  { id: 'issue06_001_policy_history_evidence', up(db) {
+    db.exec(`
+      CREATE TABLE policy_revisions (
+        agent_id TEXT NOT NULL, version INTEGER NOT NULL, changed_at TEXT NOT NULL,
+        changed_by TEXT NOT NULL, source TEXT NOT NULL, before_json TEXT, after_json TEXT NOT NULL,
+        PRIMARY KEY (agent_id, version)
+      );
+      CREATE TRIGGER policy_revisions_no_update BEFORE UPDATE ON policy_revisions
+        BEGIN SELECT RAISE(ABORT, 'Policy revision history is immutable'); END;
+      CREATE TRIGGER policy_revisions_no_delete BEFORE DELETE ON policy_revisions
+        BEGIN SELECT RAISE(ABORT, 'Policy revision history is immutable'); END;
+      CREATE TABLE policy_evidence (
+        request_id TEXT PRIMARY KEY, schema_version INTEGER NOT NULL,
+        digest TEXT NOT NULL, envelope_json TEXT NOT NULL
+      );
+    `);
+    const timestamp = new Date().toISOString();
+    for (const row of db.prepare('SELECT agent_id,json FROM policies').all()) {
+      db.prepare('INSERT INTO policy_revisions VALUES (?,1,?,?,?,NULL,?)')
+        .run(row.agent_id, timestamp, 'system:migration', 'migration', row.json);
+    }
+  } },
 
 ];
 

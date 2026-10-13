@@ -25,9 +25,9 @@ it('defaults new agents to hard-stop and preserves explicit mode when omitted fr
   expect((await request('/api/agents', 'POST', { agentId: 'budget-api', currency: 'GBP' })).status).toBe(201);
   expect(store.getPolicy('budget-api')?.budgetMode).toBe('hard-stop');
   const policy = { ...store.getPolicy('budget-api')!, dailyBudget: 100, maxPerTxn: null, newVendorRequiresApproval: false, budgetMode: 'approval-override' };
-  expect((await request('/api/policies/budget-api', 'PUT', policy)).status).toBe(200);
+  expect((await request('/api/policies/budget-api', 'PUT', { ...policy, expectedVersion: store.getPolicyVersion('budget-api') })).status).toBe(200);
   delete (policy as any).budgetMode;
-  expect((await request('/api/policies/budget-api', 'PUT', policy)).status).toBe(200);
+  expect((await request('/api/policies/budget-api', 'PUT', { ...policy, expectedVersion: store.getPolicyVersion('budget-api') })).status).toBe(200);
   expect(store.getPolicy('budget-api')?.budgetMode).toBe('approval-override');
   expect((await request('/api/policies/budget-api', 'PUT', { ...policy, budgetMode: 'anything' })).status).toBe(422);
 });

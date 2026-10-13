@@ -2,7 +2,7 @@
 // Rules: no NUL/control characters, trimmed, length-capped,
 // and money is always a bounded non-negative integer in minor units.
 
-export class InputError extends Error {}
+export class InputError extends Error { readonly status = 422; }
 
 /** Strip NUL + control chars, trim, enforce max length. Returns null when optional and absent/empty. */
 export function cleanStr(v: unknown, name: string, max: number, optional = false): string | null {

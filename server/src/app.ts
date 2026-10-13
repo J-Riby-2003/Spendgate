@@ -9,7 +9,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { seed } from './seed.js';
 import { buildMcpServer } from './mcp.js';
 import { decide, expireStale, onEvent, emit, EngineError } from './core/engine.js';
-import { cleanHhmm, cleanMinor, cleanStr, cleanVendorList, InputError } from './core/sanitize.js';
+import { cleanStr, InputError } from './core/sanitize.js';
 import { store, db, withImmediateTransaction } from './core/store.js';
 import { verifyLedger, ledgerToCsv } from './core/ledger.js';
 import { requireOperator, requireAgent, requireCsrf, requireOrigin, allowedOrigin, sessionToken, authenticateSession, assertAgentActive, authEvents, login, logout, csrfToken, SESSION_COOKIE, cookieOptions, AuthError, issueCredential, listCredentials, rotateCredential, revokeCredential, deleteAgentWithCredentials, type OperatorPrincipal } from './auth.js';
@@ -18,7 +18,9 @@ import { attachNotifier, resolveNotifier, notificationStatus } from './notify.js
 import { budget } from './core/budget-state.js';
 import { BudgetError, type ReconcileInput } from './core/budget.js';
 import { isSupportedCurrency } from '../../shared/currency.js';
-import type { Policy } from './core/types.js';
+import { parsePolicy } from './core/policy-input.js';
+import { PolicyConflict } from './core/policy-history.js';
+import { preview, replay, requestEvidence, requireVersion } from './core/simulation.js';
 
 export function createApplication() {
 const app = express();
@@ -41,6 +43,7 @@ function buildState() {
   const agents = store.listAgents().map((a) => ({
     ...a,
     policy: store.getPolicy(a.agentId),
+    policyVersion: store.getPolicyVersion(a.agentId),
     spentToday: budget.getBudgetSnapshot(a.agentId).spentMinor,
     budget: budget.getBudgetSnapshot(a.agentId),
   }));
@@ -168,46 +171,36 @@ app.post('/api/approvals/:id/decide', (req, res) => {
 });
 
 app.get('/api/policies', (_req, res) => {
-  res.json(store.listAgents().map((a) => ({ agentId: a.agentId, policy: store.getPolicy(a.agentId) })));
+  res.json(store.listAgents().map((a) => ({ agentId: a.agentId, policy: store.getPolicy(a.agentId), policyVersion: store.getPolicyVersion(a.agentId) })));
 });
 
+app.get('/api/policies/:agentId/history', (req, res) => {
+  if (!store.getPolicy(req.params.agentId)) throw new BudgetError('Unknown agent.', 404);
+  const limit = req.query.limit === undefined ? 50 : Number(req.query.limit);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) throw new InputError('History limit must be 1 to 200.');
+  res.json({ revisions: store.policyHistory(req.params.agentId, limit) });
+});
+app.post('/api/policies/:agentId/preview', (req, res) => {
+  res.json(preview(req.params.agentId, req.body?.policy, req.body?.sample));
+});
+app.post('/api/policies/:agentId/replay', (req, res) => {
+  res.json(replay(req.params.agentId, req.body?.policy, req.body?.expectedVersion, req.body?.limit === undefined ? 50 : req.body.limit));
+});
+app.get('/api/requests/:requestId/evidence', (req, res) => {
+  if (!db.prepare('SELECT 1 FROM spend_requests WHERE request_id=?').get(req.params.requestId)) throw new BudgetError('Unknown request.', 404);
+  res.json(requestEvidence(req.params.requestId) ?? { integrity: 'unavailable', digest: null, envelope: null });
+});
 app.put('/api/policies/:agentId', (req, res) => {
-  try {
-    const agentId = req.params.agentId;
-    if (!store.listAgents().some((a) => a.agentId === agentId)) {
-      return res.status(404).json({ error: `Unknown agent "${agentId}".` });
-    }
-    const b = req.body ?? {};
-    const allowedVendors = b.allowedVendors === undefined || b.allowedVendors === '*' ? '*' : cleanVendorList(b.allowedVendors, 'allowedVendors');
-    const blockedVendors = b.blockedVendors == null ? [] : cleanVendorList(b.blockedVendors, 'blockedVendors');
-    const allowedDays = b.allowedDays ?? '*';
-    if (allowedDays !== '*' && !(Array.isArray(allowedDays) && allowedDays.length <= 7 && allowedDays.every((d) => Number.isInteger(d) && d >= 0 && d <= 6))) {
-      throw new InputError('allowedDays must be "*" or a list of weekday indices 0–6 (0 = Sunday).');
-    }
-    const mode = b.budgetMode ?? store.getPolicy(agentId)?.budgetMode ?? 'hard-stop';
-    if (mode !== 'hard-stop' && mode !== 'approval-override') throw new InputError('Invalid budget mode.');
-    const policy: Policy = {
-      agentId,
-      maxPerTxn: cleanMinor(b.maxPerTxn, 'maxPerTxn'),
-      dailyBudget: cleanMinor(b.dailyBudget, 'dailyBudget'),
-      budgetMode: mode,
-      approvalThreshold: cleanMinor(b.approvalThreshold, 'approvalThreshold'),
-      allowedVendors,
-      blockedVendors,
-      newVendorRequiresApproval: Boolean(b.newVendorRequiresApproval),
-      allowedDays,
-      allowedWindow: b.allowedWindow == null ? null : {
-        start: cleanHhmm(b.allowedWindow.start, 'Window start'),
-        end: cleanHhmm(b.allowedWindow.end, 'Window end'),
-      },
-    };
-    withImmediateTransaction(() => store.upsertPolicy(policy));
-    emit({ type: 'state' });
-    res.json({ ok: true, policy });
-  } catch (err) {
-    if (err instanceof InputError) return res.status(422).json({ error: err.message });
-    throw err;
-  }
+  const expectedVersion = requireVersion(req.body?.expectedVersion);
+  const result = withImmediateTransaction(() => {
+    const current = store.getPolicy(req.params.agentId);
+    if (!current) throw new BudgetError('Unknown agent.', 404);
+    const policy = parsePolicy(req.params.agentId, req.body, current.budgetMode);
+    const policyVersion = store.upsertPolicy(policy, { expectedVersion, changedBy: (res.locals.principal as OperatorPrincipal).operatorId, source: 'operator' });
+    return { policy, policyVersion };
+  });
+  emit({ type: 'state' });
+  res.json({ ok: true, ...result });
 });
 
 app.delete('/api/agents/:agentId', (req, res) => {
@@ -255,7 +248,7 @@ app.post('/api/agents', (req, res) => {
       newVendorRequiresApproval: true,
       allowedDays: '*',
       allowedWindow: null,
-    });
+    }, { changedBy: (res.locals.principal as OperatorPrincipal).operatorId, source: 'operator' });
     });
     emit({ type: 'state' });
     res.status(201).json({ ok: true });
@@ -361,6 +354,7 @@ app.post('/api/decide/:token', (req, res) => {
 
 // error handler
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err instanceof PolicyConflict) return res.status(err.status).json({ error: err.message });
   if (err instanceof BudgetError) return res.status(err.status).json({ error: err.message });
   if (err instanceof AuthError) return res.status(err.status).json({ error: err.message });
   if (err instanceof EngineError) return res.status(err.status).json({ error: err.message });

@@ -19,7 +19,7 @@ test('operator selects a budget mode and sees permission reserved separately fro
   // Keep request in the automatic path for this balance test.
   const state = await (await fetch(`${BASE}/api/state`, { headers })).json();
   const policy = state.agents.find((a: any) => a.agentId === agentId).policy;
-  await fetch(`${BASE}/api/policies/${agentId}`, { method: 'PUT', headers, body: JSON.stringify({ ...policy, newVendorRequiresApproval: false, allowedDays: '*' }) });
+  await fetch(`${BASE}/api/policies/${agentId}`, { method: 'PUT', headers, body: JSON.stringify({ ...policy, expectedVersion: state.agents.find((a: any) => a.agentId === agentId).policyVersion, newVendorRequiresApproval: false, allowedDays: '*' }) });
   const client = new Client({ name: 'budget-browser', version: '1' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), { requestInit: { headers: await agentHeaders(agentId) } }));
   try {
