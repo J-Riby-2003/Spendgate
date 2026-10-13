@@ -1,26 +1,22 @@
+import { processWorker } from './helpers/process-worker.js';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterAll, expect, it, vi } from 'vitest';
-const dir = mkdtempSync(join(tmpdir(), 'spendgate-process-'));
-afterAll(() => rmSync(dir, { recursive: true, force: true }));
+import { beforeEach, afterEach, expect, it, vi } from 'vitest';
+let dir: string;
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'spendgate-process-')); });
+const workers = new Set<ReturnType<typeof processWorker>>();
+afterEach(async () => {
+  await Promise.all([...workers].map(worker => worker.stop()));
+  workers.clear();
+  rmSync(dir, { recursive: true, force: true });
+});
 function worker() {
-  const child = spawn(process.execPath, ['--import', 'tsx', 'test/fixtures/durable-worker.ts'], { env: { ...process.env, SPENDGATE_DATA: dir }, stdio: ['pipe','pipe','pipe'] });
-  let output = '', errors = '';
-  let readyResolve!: () => void;
-  const ready = new Promise<void>(resolve => { readyResolve = resolve; });
-  child.stdout.on('data', chunk => { output += String(chunk); if (output.includes('ready\n')) readyResolve(); });
-  child.stderr.on('data', chunk => { errors += String(chunk); });
-  const exited = new Promise<any>((resolve, reject) => {
-    child.on('error', reject);
-    child.on('exit', code => {
-      if (code !== 0) { reject(new Error(errors)); return; }
-      try { resolve(JSON.parse(output.trim().split('\n').at(-1)!)); } catch { reject(new Error(output + errors)); }
-    });
-  });
-  return { ready, async run(command: unknown) { await ready; child.stdin.end(JSON.stringify(command) + '\n'); return exited; } };
+  const child = processWorker(['--import', 'tsx', 'test/fixtures/durable-worker.ts'], { ...process.env, SPENDGATE_DATA: dir });
+  workers.add(child);
+  return child;
 }
 async function run(command: unknown) { return worker().run(command); }
 it('recovers pending request and idempotency after actual process termination, then finalises without a waiter', async () => {
@@ -86,6 +82,7 @@ it('recovers the exact pending request after an ungraceful SIGKILL', async () =>
   let output = '';
   child.stdout.on('data', chunk => { output += String(chunk); });
   child.stderr.resume();
+  const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
   child.stdin.end(JSON.stringify({ action: 'submit', key: 'hard-crash', crash: true }) + '\n');
   try {
     await vi.waitFor(() => expect(output).toContain('PENDING'), { timeout: 5000 });
@@ -95,5 +92,8 @@ it('recovers the exact pending request after an ungraceful SIGKILL', async () =>
     expect((await run({ action: 'submit', key: 'hard-crash' })).result).toEqual(pending);
     expect((await run({ action: 'decide', approvalId: pending.approvalId, approve: false })).result).toBe(true);
     expect((await run({ action: 'get', requestId: pending.requestId })).result.decision).toBe('REJECTED');
-  } finally { if (child.exitCode == null && child.signalCode == null) child.kill('SIGKILL'); }
+  } finally {
+    if (child.exitCode == null && child.signalCode == null) child.kill('SIGKILL');
+    await closed;
+  }
 }, 15000);

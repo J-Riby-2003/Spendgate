@@ -2,6 +2,7 @@ import { createBudgetStore } from './budget.js';
 import { isSupportedCurrency } from '../../../shared/currency.js';
 import { BudgetError } from './budget.js';
 import { migrate } from './migrations.js';
+import { configureSqlite } from './sqlite-bootstrap.js';
 import { withImmediateTransaction as runImmediate } from './transactions.js';
 // SQLite persistence via node's built-in sqlite (no native deps).
 import { DatabaseSync } from 'node:sqlite';
@@ -15,7 +16,7 @@ mkdirSync(DATA_DIR, { recursive: true });
 
 export const db = new DatabaseSync(join(DATA_DIR, 'spendgate.db'));
 
-db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 10000');
+configureSqlite(db);
 migrate(db);
 
 // --- signing secret (generated once, lives outside the db) ---
