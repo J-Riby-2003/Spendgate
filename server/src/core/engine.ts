@@ -141,7 +141,7 @@ function broadcast(result: RequestSnapshot): void {
 export interface FinalisationResult { changed: boolean; requestId: string | null; status: ApprovalRequest['status'] | null }
 export type DecisionActor = DecisionDetails['actor'];
 /** All writes, including capability consumption, share one BEGIN IMMEDIATE boundary. */
-export function finaliseApproval(approvalId: string, action: 'approve' | 'reject' | 'expire', actor: DecisionActor, note?: string, tokenHash?: string): FinalisationResult {
+export function finaliseApproval(approvalId: string, action: 'approve' | 'reject' | 'expire', actor: DecisionActor, note?: string, tokenHash?: string, options?: { allowBudgetOverride: boolean }): FinalisationResult {
   const result = withImmediateTransaction<FinalisationResult>(() => {
     const approval = store.getApproval(approvalId);
     if (!approval) return { changed: false, requestId: null, status: null };
@@ -166,8 +166,9 @@ export function finaliseApproval(approvalId: string, action: 'approve' | 'reject
       const over = snapshot.remainingMinor != null && approval.intent.amount > snapshot.remainingMinor;
       if (over && finalActor.kind !== 'operator') throw new BudgetError('Budget overrides require an authenticated console operator.');
       if (over && snapshot.mode === 'approval-override' && !finalNote?.trim()) throw new BudgetError('An explicit override reason is required.', 422);
+      if (over && snapshot.mode === 'approval-override' && options?.allowBudgetOverride !== true) throw new BudgetError('Budget changed. Review and explicitly approve the budget override.');
       reserveIntent(approval.intent, now, over ? { operatorId: finalActor.id!, reason: finalNote ?? '' } : undefined);
-      recheck = { reservedMinor: snapshot.reservedMinor, remainingMinor: snapshot.remainingMinor, overrideReason: over ? finalNote : null };
+      recheck = { reservedMinor: snapshot.reservedMinor, remainingMinor: snapshot.remainingMinor, overrideReason: over ? finalNote : null, overrideConsent: over && options?.allowBudgetOverride === true };
     } else {
       // Pending requests normally have no hold. Never release an already-final execution reservation.
       const reservation = budget.getReservation(approval.intent.id);
@@ -191,7 +192,7 @@ export function finaliseApproval(approvalId: string, action: 'approve' | 'reject
   return result;
 }
 export function decide(approvalId: string, approve: boolean, by: string, note?: string): boolean {
-  const result = finaliseApproval(approvalId, approve ? 'approve' : 'reject', by === 'decision-link' ? { kind: 'decision-link', id: null } : { kind: 'operator', id: by }, note);
+  const result = finaliseApproval(approvalId, approve ? 'approve' : 'reject', by === 'decision-link' ? { kind: 'decision-link', id: null } : { kind: 'operator', id: by }, note, undefined, { allowBudgetOverride: by !== 'decision-link' && Boolean(note?.trim()) });
   return result.changed && result.status === (approve ? 'approved' : 'rejected');
 }
 export function expireStale(): void {

@@ -8,7 +8,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { seed } from './seed.js';
 import { buildMcpServer } from './mcp.js';
-import { decide, expireStale, onEvent, emit, EngineError } from './core/engine.js';
+import { finaliseApproval, expireStale, onEvent, emit, EngineError } from './core/engine.js';
 import { cleanHhmm, cleanMinor, cleanStr, cleanVendorList, InputError } from './core/sanitize.js';
 import { store, db, withImmediateTransaction } from './core/store.js';
 import { verifyLedger, ledgerToCsv } from './core/ledger.js';
@@ -16,6 +16,7 @@ import { requireOperator, requireAgent, requireCsrf, requireOrigin, allowedOrigi
 import { mintDecisionLinks, decideByToken, hashToken } from './decide-links.js';
 import { attachNotifier, resolveNotifier, notificationStatus } from './notify.js';
 import { budget } from './core/budget-state.js';
+import { approvalQueueContext, getApprovalContext } from './core/approval-context.js';
 import { BudgetError, type ReconcileInput } from './core/budget.js';
 import { isSupportedCurrency } from '../../shared/currency.js';
 import type { Policy } from './core/types.js';
@@ -38,6 +39,7 @@ function approvalProjection(a: ReturnType<typeof store.pendingApprovals>[number]
   return { ...a, requestId: a.intent.id, notification: { ...notificationStatus(a.id), configured: notifier !== null } };
 }
 function buildState() {
+  const approvals = approvalQueueContext();
   const agents = store.listAgents().map((a) => ({
     ...a,
     policy: store.getPolicy(a.agentId),
@@ -50,8 +52,8 @@ function buildState() {
   return {
     agents,
     ledger: store.recentLedger(50),
-    approvalsPending: store.pendingApprovals().map(approvalProjection),
-    approvalsRecent: store.recentDecidedApprovals(20).map(approvalProjection),
+    approvalsPending: approvals.pending.map(approvalProjection),
+    approvalsRecent: approvals.recent.map(approvalProjection),
     stats: {
       allowedToday: allToday.filter((e) => e.decision === 'ALLOWED').length,
       approvedToday: allToday.filter((e) => e.decision === 'APPROVED').length,
@@ -139,7 +141,15 @@ app.get('/api/approval-recovery', (_req, res) => {
 
 app.get('/api/approvals', (_req, res) => {
   expireStale();
-  res.json({ pending: store.pendingApprovals().map(approvalProjection), recent: store.recentDecidedApprovals(20).map(approvalProjection) });
+  const approvals = approvalQueueContext();
+  res.json({ pending: approvals.pending.map(approvalProjection), recent: approvals.recent.map(approvalProjection) });
+});
+
+app.get('/api/approvals/:id/context', (req, res) => {
+  expireStale();
+  const approval = getApprovalContext(req.params.id);
+  if (!approval) return res.status(404).json({ error: 'Unknown approval.' });
+  res.json(approvalProjection(approval));
 });
 
 // Mint (or fetch fresh) phone-decision links for a pending approval.
@@ -158,10 +168,12 @@ app.post('/api/approvals/:id/decide', (req, res) => {
     if (typeof approve !== 'boolean') return res.status(422).json({ error: 'approve (boolean) is required' });
     const by = (res.locals.principal as OperatorPrincipal).operatorId;
     const note = cleanStr(req.body?.note, 'note', 500, true) ?? undefined;
-    const ok = decide(req.params.id, approve, by, note);
-    if (!ok) return res.status(409).json({ error: 'Approval is no longer pending (already decided or expired).' });
-    res.json({ ok: true });
+    if (req.body?.overrideBudget !== undefined && typeof req.body.overrideBudget !== 'boolean') return res.status(422).json({ error: 'overrideBudget must be a boolean.' });
+    const outcome = finaliseApproval(req.params.id, approve ? 'approve' : 'reject', { kind: 'operator', id: by }, note, undefined, { allowBudgetOverride: req.body?.overrideBudget === true });
+    if (!outcome.changed || outcome.status !== (approve ? 'approved' : 'rejected')) return res.status(409).json({ code: 'approval-not-pending', error: 'Approval is no longer pending (already decided or expired).', approval: getApprovalContext(req.params.id) });
+    res.json({ ok: true, approval: getApprovalContext(req.params.id) });
   } catch (err) {
+    if (err instanceof BudgetError) return res.status(err.status).json({ code: 'approval-budget-conflict', error: err.message, approval: getApprovalContext(req.params.id) });
     if (err instanceof InputError) return res.status(422).json({ error: err.message });
     throw err;
   }

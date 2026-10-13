@@ -127,3 +127,7 @@ No decorative gold accents. Active navigation uses a paper-coloured border, prim
 ## Budget accounting controls
 
 Agent policy cards show completed spend, reserved funds and remaining budget separately, including unlimited budgets and negative remaining values after an override. Show the daily UTC period beside balances. Permission is not proof of payment. Add a labelled Budget mode select (Hard stop / Approval override) using the existing input styling, with a terse explanation of the selected mode. Legacy reconciliation uses bordered rows and labelled controls, a plain-language attestation preserving unknown history, evidence and reason fields, and the existing confirmation modal before recording a disposition. Error copy uses the danger colour; no new visual tokens.
+
+## Decision-ready approval cards
+
+Approval cards use existing black/paper/line surfaces and status colours. Amounts include the currency code. Stack budget values and actions on narrow screens; wrap purpose, vendor, notes and identifiers rather than hiding them. Each request has its own labelled note and native buttons with visible keyboard focus and at least 44px action height. Show expiry, delivery state, vendor authorisation history and projected budget effect in the same card. Keep authenticated decision-maker names and recorded notes visible in recent decisions on mobile. Completion/error messages announce the result and receive focus; countdown ticks do not announce continuously.

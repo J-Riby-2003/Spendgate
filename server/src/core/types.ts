@@ -41,7 +41,7 @@ export interface DecisionDetails {
   actor: { kind: 'policy' | 'operator' | 'decision-link' | 'expiry'; id: string | null };
   note: string | null;
   evidence: { schemaVersion: number; digest: string } | null;
-  budgetRecheck: { reservedMinor: number; remainingMinor: number | null; overrideReason: string | null } | null;
+  budgetRecheck: { reservedMinor: number; remainingMinor: number | null; overrideReason: string | null; overrideConsent?: boolean } | null;
 }
 
 export interface LedgerEntry {

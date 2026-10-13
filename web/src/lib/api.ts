@@ -1,3 +1,4 @@
+import type { ApprovalDecisionContext } from '../../../shared/approval-context';
 import { CURRENCIES, currencyPrecision, isSupportedCurrency, parseMinor } from '../../../shared/currency';
 export { CURRENCIES };
 // Shared client types mirroring the server contract.
@@ -43,6 +44,7 @@ export interface LedgerEntry {
 }
 
 export interface ApprovalRequest {
+  context?: ApprovalDecisionContext;
   id: string;
   requestId: string;
   expiresAt: string;
@@ -178,12 +180,20 @@ export async function fetchState(): Promise<State> {
   return res.json();
 }
 
-export async function decideApproval(id: string, approve: boolean, note?: string): Promise<void> {
+export class ApprovalDecisionError extends Error {
+  constructor(message: string, public approval: ApprovalRequest | null) { super(message); }
+}
+
+export async function decideApproval(id: string, approve: boolean, note?: string, overrideBudget = false): Promise<void> {
   const res = await fetch(`/api/approvals/${id}/decide`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ approve, note }),
+    body: JSON.stringify({ approve, note, overrideBudget }),
   });
+  if (!res.ok && (res.status === 409 || res.status === 422)) {
+    const body = await res.json();
+    throw new ApprovalDecisionError(body.error ?? 'Decision could not be recorded.', body.approval ?? null);
+  }
   await checkOk(res, 'decide');
 }
 
