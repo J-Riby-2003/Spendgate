@@ -120,14 +120,24 @@ export function revokeCredential(agentId: string, id: string, operatorId: string
   });
   authEvents.emit('credential-revoked', id);
 }
+/** Unwrapped row changes; callers own transaction and post-commit notifications. */
+function revokeAgentCredentialRows(agentId: string, operatorId: string): string[] {
+  const rows = db.prepare('SELECT id FROM agent_credentials WHERE agent_id=? AND revoked_at IS NULL').all(agentId);
+  for (const row of rows) {
+    db.prepare('UPDATE agent_credentials SET revoked_at=? WHERE id=?').run(Date.now(), row.id as string);
+    audit('credential.revoked', operatorId, agentId, String(row.id));
+  }
+  return rows.map(r => String(r.id));
+}
 export function revokeAgentCredentials(agentId: string, operatorId: string): void {
+  const ids = withImmediateTransaction(() => revokeAgentCredentialRows(agentId, operatorId));
+  for (const id of ids) authEvents.emit('credential-revoked', id);
+}
+/** The budget guard, policy/agent deletion and credential audit share one writer lock. */
+export function deleteAgentWithCredentials(agentId: string, operatorId: string): void {
   const ids = withImmediateTransaction(() => {
-    const rows = db.prepare('SELECT id FROM agent_credentials WHERE agent_id=? AND revoked_at IS NULL').all(agentId);
-    for (const row of rows) {
-      db.prepare('UPDATE agent_credentials SET revoked_at=? WHERE id=?').run(Date.now(), row.id as string);
-      audit('credential.revoked', operatorId, agentId, String(row.id));
-    }
-    return rows.map(r => String(r.id));
+    store.deleteAgent(agentId);
+    return revokeAgentCredentialRows(agentId, operatorId);
   });
   for (const id of ids) authEvents.emit('credential-revoked', id);
 }

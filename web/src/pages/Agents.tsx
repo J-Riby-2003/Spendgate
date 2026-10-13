@@ -1,3 +1,4 @@
+import BudgetReconciliation from '../components/BudgetReconciliation';
 import Credentials from '../components/Credentials';
 import { useState } from 'react';
 import {
@@ -13,15 +14,16 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
   const { t } = useLang();
   const p = agent.policy!;
   const initialForm = {
-    maxPerTxn: minorToUnits(p.maxPerTxn),
-    dailyBudget: minorToUnits(p.dailyBudget),
-    approvalThreshold: minorToUnits(p.approvalThreshold),
+    maxPerTxn: minorToUnits(p.maxPerTxn, agent.currency),
+    dailyBudget: minorToUnits(p.dailyBudget, agent.currency),
+    budgetMode: p.budgetMode,
+    approvalThreshold: minorToUnits(p.approvalThreshold, agent.currency),
     newVendor: p.newVendorRequiresApproval,
     blocked: p.blockedVendors.join(', '),
     windowEnabled: p.allowedWindow != null,
     windowStart: p.allowedWindow?.start ?? '08:00',
     windowEnd: p.allowedWindow?.end ?? '20:00',
-    days: p.allowedDays === '*' ? [1, 2, 3, 4, 5] : p.allowedDays,
+    days: p.allowedDays === '*' ? [0, 1, 2, 3, 4, 5, 6] : p.allowedDays,
   };
   const [form, setForm] = useState(initialForm);
   const [baseline, setBaseline] = useState(initialForm);
@@ -40,7 +42,7 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
     setError(null);
     const parseAmt = (raw: string, label: string): number | null | false => {
       if (raw.trim() === '') return null;
-      const v = toMinor(raw);
+      const v = toMinor(raw, agent.currency);
       if (v === null) {
         setError(`${label}: enter a valid amount (0 – 10,000,000,000).`);
         return false;
@@ -67,6 +69,7 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
       agentId: agent.agentId,
       maxPerTxn,
       dailyBudget,
+      budgetMode: form.budgetMode,
       approvalThreshold,
       allowedVendors: p.allowedVendors,
       blockedVendors: blocked,
@@ -85,20 +88,35 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
   }
 
   const budget = agent.policy?.dailyBudget ?? null;
-  const pct = budget ? Math.min(100, Math.round((agent.spentToday / budget) * 100)) : null;
+  const balances = agent.budget;
+  const pct = budget ? Math.min(100, Math.round(((balances.spentMinor + balances.reservedMinor) / budget) * 100)) : null;
 
   return (
-    <div className="border border-line bg-black rounded-lg p-6 mb-6">
+    <section aria-label={`Policy for ${agent.agentId}`} className="border border-line bg-black rounded-lg p-6 mb-6">
       <div className="flex items-baseline justify-between mb-1">
         <h2 className="font-body text-[15px] font-medium text-paper">{agent.displayName}</h2>
         <Mono>{agent.agentId}</Mono>
       </div>
 
+      <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 mb-3">
+        <div><dt className="font-mono text-[11px]">Completed spend</dt><dd data-testid="budget-spent" className="font-mono text-sm">{fmt(balances.spentMinor, agent.currency)}</dd></div>
+        <div><dt className="font-mono text-[11px]">Reserved</dt><dd data-testid="budget-reserved" className="font-mono text-sm">{fmt(balances.reservedMinor, agent.currency)}</dd></div>
+        <div><dt className="font-mono text-[11px]">Remaining</dt><dd data-testid="budget-remaining" className="font-mono text-sm">{balances.remainingMinor == null ? 'Unlimited' : fmt(balances.remainingMinor, agent.currency)}</dd></div>
+      </dl>
+      <p className="font-mono text-[11px] mb-4">Daily period: UTC · {balances.periodStart.slice(0, 10)} · Pending approvals reserve nothing</p>
+      <BudgetReconciliation agent={agent} />
+      <label className="block font-mono text-[12px] mb-2" htmlFor={`budget-mode-${agent.agentId}`}>Budget mode</label>
+      <select id={`budget-mode-${agent.agentId}`} value={form.budgetMode} onChange={e => set({ budgetMode: e.target.value as Policy['budgetMode'] })}
+        className="h-10 bg-black border border-line rounded-md px-3 text-sm text-paper mb-2">
+        <option value="hard-stop">Hard stop</option><option value="approval-override">Approval override</option>
+      </select>
+      <p className="text-[12px] mb-5">{form.budgetMode === 'hard-stop' ? 'Requests exceeding available funds are denied.' : 'Exceeding available funds requires a console operator and an override reason.'}</p>
+
       {pct != null && (
         <div className="mb-5">
           <div className="flex justify-between mb-1.5">
             <Mono>{t('label.dailyBudget')}</Mono>
-            <Mono className="text-paper">{fmt(agent.spentToday, currency)} / {fmt(budget ?? 0, currency)}</Mono>
+            <Mono className="text-paper">{fmt(balances.spentMinor + balances.reservedMinor, agent.currency)} / {fmt(budget ?? 0, agent.currency)}</Mono>
           </div>
           <div className="h-1.5 bg-line rounded-full overflow-hidden">
             <div
@@ -203,8 +221,7 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
         <CurrencySelect
           value={currency}
           onChange={(c) => {
-            setCur(c);
-            setCurrency(agent.agentId, c).catch((err) => setError(String(err)));
+            setCurrency(agent.agentId, c).then(() => { setCur(c); setError(null); }).catch((err) => setError(String(err)));
           }}
         />
         <button
@@ -267,7 +284,7 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
           onClose={() => setConfirmDelete(false)}
         />
       )}
-    </div>
+    </section>
   );
 }
 
@@ -370,7 +387,7 @@ export default function Agents({ state }: { state: State }) {
       <PageHeader sub={t('page.agents.sub')} title={t('page.agents.title')} right={<Mono>{t('header.agentsCount', { n: state.agents.length })}</Mono>} />
 
       {state.agents.map((a) => (
-        <PolicyEditor key={a.agentId} agent={a} />
+        <PolicyEditor key={`${a.agentId}:${a.currency}`} agent={a} />
       ))}
 
       <button

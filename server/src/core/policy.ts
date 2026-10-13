@@ -9,6 +9,7 @@ export interface EvalResult {
 
 export interface EvalContext {
   spentTodayMinor: number;
+  reservedMinor?: number;
   knownVendors: Set<string>;
   now: Date;
 }
@@ -16,7 +17,7 @@ export interface EvalContext {
 function inWindow(window: { start: string; end: string }, now: Date): boolean {
   const [sh, sm] = window.start.split(':').map(Number);
   const [eh, em] = window.end.split(':').map(Number);
-  const cur = now.getHours() * 60 + now.getMinutes();
+  const cur = now.getUTCHours() * 60 + now.getUTCMinutes();
   return cur >= sh * 60 + sm && cur <= eh * 60 + em;
 }
 
@@ -25,6 +26,11 @@ export function evaluate(policy: Policy, intent: SpendIntent, ctx: EvalContext):
 
   if (policy.blockedVendors.map((v) => v.toLowerCase()).includes(vendor.toLowerCase())) {
     return { decision: 'DENY', rule: 'vendor-blocked', reason: `"${vendor}" is on this agent's blocklist.` };
+  }
+
+  if (policy.dailyBudget != null && ctx.spentTodayMinor + (ctx.reservedMinor ?? 0) + amount > policy.dailyBudget) {
+    return { decision: policy.budgetMode === 'approval-override' ? 'ESCALATE' : 'DENY', rule: 'over-daily-budget',
+      reason: policy.budgetMode === 'approval-override' ? 'Insufficient available budget — an explicit human override is required.' : 'Insufficient available budget — this policy has a hard stop.' };
   }
 
   if (policy.allowedVendors !== '*') {
@@ -50,17 +56,13 @@ export function evaluate(policy: Policy, intent: SpendIntent, ctx: EvalContext):
   }
 
   if (policy.allowedDays !== '*') {
-    if (!policy.allowedDays.includes(ctx.now.getDay())) {
+    if (!policy.allowedDays.includes(ctx.now.getUTCDay())) {
       return { decision: 'ESCALATE', rule: 'outside-allowed-days', reason: `Spending is restricted to ${policy.allowedDays.map(dName).join(', ')}.` };
     }
   }
 
   if (policy.allowedWindow && !inWindow(policy.allowedWindow, ctx.now)) {
     return { decision: 'ESCALATE', rule: 'outside-allowed-hours', reason: `Outside the allowed window (${policy.allowedWindow.start}–${policy.allowedWindow.end}).` };
-  }
-
-  if (policy.dailyBudget != null && ctx.spentTodayMinor + amount > policy.dailyBudget) {
-    return { decision: 'ESCALATE', rule: 'over-daily-budget', reason: `This would take the agent over its daily budget.` };
   }
 
   return { decision: 'ALLOW', rule: 'within-policy', reason: 'Within all policy limits.' };

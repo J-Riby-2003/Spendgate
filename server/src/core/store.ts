@@ -1,3 +1,6 @@
+import { createBudgetStore } from './budget.js';
+import { isSupportedCurrency } from '../../../shared/currency.js';
+import { BudgetError } from './budget.js';
 import { migrate } from './migrations.js';
 import { withImmediateTransaction as runImmediate } from './transactions.js';
 // SQLite persistence via node's built-in sqlite (no native deps).
@@ -12,7 +15,7 @@ mkdirSync(DATA_DIR, { recursive: true });
 
 export const db = new DatabaseSync(join(DATA_DIR, 'spendgate.db'));
 
-db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 10000');
 migrate(db);
 
 // --- signing secret (generated once, lives outside the db) ---
@@ -88,8 +91,6 @@ const stmts = {
   recentLedger: db.prepare('SELECT * FROM ledger ORDER BY seq DESC LIMIT ?'),
   ledgerByAgent: db.prepare('SELECT * FROM ledger WHERE agent_id = ? ORDER BY seq DESC LIMIT ?'),
   allLedger: db.prepare('SELECT * FROM ledger ORDER BY seq ASC'),
-  todaySpend: db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM ledger
-    WHERE agent_id = ? AND decision IN ('ALLOWED','APPROVED') AND ts >= ?`),
   knownVendors: db.prepare(`SELECT DISTINCT vendor FROM ledger
     WHERE agent_id = ? AND decision IN ('ALLOWED','APPROVED')`),
   listAgents: db.prepare('SELECT * FROM agents'),
@@ -175,10 +176,7 @@ export const store = {
   },
 
   spentToday(agentId: string): number {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const r = stmts.todaySpend.get(agentId, start.toISOString()) as { total: number };
-    return r.total;
+    return createBudgetStore(db).getBudgetSnapshot(agentId).spentMinor;
   },
 
   knownVendors(agentId: string): Set<string> {
@@ -194,11 +192,15 @@ export const store = {
   },
 
   upsertAgent(agentId: string, displayName: string, currency: string): void {
+    const existing = db.prepare('SELECT currency FROM agents WHERE agent_id = ?').get(agentId);
+    if (!isSupportedCurrency(currency)) throw new BudgetError('Unsupported currency.', 422);
+    if (existing && existing.currency !== currency) createBudgetStore(db).assertAgentMutable(agentId);
     stmts.upsertAgent.run(agentId, displayName, currency);
   },
 
   /** Removes the agent and its policy. Ledger history is kept for audit. */
   deleteAgent(agentId: string): void {
+    createBudgetStore(db).assertAgentMutable(agentId);
     stmts.deletePolicy.run(agentId);
     stmts.deleteAgent.run(agentId);
   },

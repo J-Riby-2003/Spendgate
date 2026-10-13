@@ -20,7 +20,7 @@ const AGENT = 'engine-test';
 const POLICY: Policy = {
   agentId: AGENT,
   maxPerTxn: 10_000,
-  dailyBudget: 500_000,
+  dailyBudget: 500_000, budgetMode: 'hard-stop',
   approvalThreshold: 20_000,
   allowedVendors: '*',
   blockedVendors: ['evil-corp'],
@@ -140,5 +140,50 @@ describe('EngineError shape', () => {
     const e = new EngineError('boom', 409);
     expect(e).toBeInstanceOf(Error);
     expect(e.status).toBe(409);
+  });
+});
+
+describe('budget authorisation integration', () => {
+  it('rejects a supported currency that differs from the configured agent currency', async () => {
+    await expect(spend({ currency: 'USD' })).rejects.toMatchObject({ status: 422 });
+  });
+  it('hard-stops before a per-transaction escalation and records no permission as completed spend', async () => {
+    store.upsertAgent('hard-budget', 'Hard budget', 'GBP');
+    store.upsertPolicy({ ...POLICY, agentId: 'hard-budget', dailyBudget: 100, budgetMode: 'hard-stop', maxPerTxn: 50 });
+    const r = await spend({ agentId: 'hard-budget', amount: 101 });
+    expect(r.decision).toBe('DENIED');
+    expect(r.rule).toBe('over-daily-budget');
+    expect(store.pendingApprovals().filter(a => a.intent.agentId === 'hard-budget')).toHaveLength(0);
+    const allowed = await spend({ agentId: 'hard-budget', amount: 40, idempotencyKey: 'budget-once' });
+    await spend({ agentId: 'hard-budget', amount: 40, idempotencyKey: 'budget-once' });
+    const { budget } = await import('../src/core/budget-state.js');
+    expect(budget.getBudgetSnapshot('hard-budget')).toMatchObject({ spentMinor: 0, reservedMinor: 40, remainingMinor: 60 });
+    expect(budget.getReservation(allowed.requestId)?.amountMinor).toBe(40);
+  });
+  it('pending approval reserves nothing; competing authorisations can exhaust funds before approval', async () => {
+    store.upsertAgent('approve-budget', 'Approve budget', 'GBP');
+    store.upsertPolicy({ ...POLICY, agentId: 'approve-budget', dailyBudget: 100, budgetMode: 'hard-stop', maxPerTxn: 50 });
+    const pending = spend({ agentId: 'approve-budget', amount: 60 });
+    const a = store.pendingApprovals().find(a => a.intent.agentId === 'approve-budget')!;
+    const { budget } = await import('../src/core/budget-state.js');
+    expect(budget.getBudgetSnapshot('approve-budget').reservedMinor).toBe(0);
+    await spend({ agentId: 'approve-budget', amount: 50 });
+    expect(() => decide(a.id, true, 'operator')).toThrow(/funds/i);
+    expect(store.getApproval(a.id)?.status).toBe('pending');
+    decide(a.id, false, 'operator'); await pending;
+    expect(budget.getBudgetSnapshot('approve-budget').reservedMinor).toBe(50);
+  });
+  it('records an explicit override in accounting and the signed decision rule', async () => {
+    store.upsertAgent('override-budget', 'Override budget', 'GBP');
+    store.upsertPolicy({ ...POLICY, agentId: 'override-budget', dailyBudget: 100, budgetMode: 'approval-override' });
+    const pending = spend({ agentId: 'override-budget', amount: 120 });
+    const a = store.pendingApprovals().find(a => a.intent.agentId === 'override-budget')!;
+    expect(() => decide(a.id, true, 'decision-link')).toThrow(/console/i);
+    expect(() => decide(a.id, true, 'operator')).toThrow(/reason/i);
+    decide(a.id, true, 'operator', 'Necessary exception');
+    const r = await pending;
+    expect(r.rule).toBe('budget-override:over-daily-budget');
+    const { budget } = await import('../src/core/budget-state.js');
+    expect(budget.getBudgetSnapshot('override-budget')).toMatchObject({ spentMinor: 0, reservedMinor: 120, remainingMinor: -20 });
   });
 });

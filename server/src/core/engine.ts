@@ -2,8 +2,11 @@
 // evaluate → allow (ledger) | deny (ledger) | escalate (approval queue → wait for a human → ledger).
 import { randomUUID } from 'node:crypto';
 import type { ApprovalRequest, LedgerDecision, Rail, SpendIntent } from './types.js';
-import { store } from './store.js';
-import { evaluate } from './policy.js';
+import { store, withImmediateTransaction } from './store.js';
+import { budget } from './budget-state.js';
+import { BudgetError } from './budget.js';
+import { isSupportedCurrency } from '../../../shared/currency.js';
+import { evaluate, type EvalResult } from './policy.js';
 import { appendLedger } from './ledger.js';
 import { awaitDecisionAsync, resolveWaiter } from './waiters.js';
 import { cleanStr } from './sanitize.js';
@@ -35,6 +38,7 @@ export class EngineError extends Error {
 
 export interface SpendResult {
   intent: SpendIntent;
+  requestId: string;
   decision: LedgerDecision;
   rule: string;
   reason: string;
@@ -67,91 +71,103 @@ export async function submitSpend(input: {
     throw new EngineError('vendor and purpose are required.', 422);
   }
   const currency = typeof input.currency === 'string' ? input.currency.toUpperCase() : '';
-  if (!/^[A-Z]{3}$/.test(currency)) {
-    throw new EngineError('currency must be a 3-letter ISO 4217 code.', 422);
-  }
+  if (!isSupportedCurrency(currency)) throw new EngineError('Unsupported currency.', 422);
+  if (currency !== agent.currency) throw new EngineError('Request currency must match the configured agent currency.', 422);
 
   const policy = store.getPolicy(input.agentId);
   if (!policy) throw new EngineError(`No policy for agent "${input.agentId}".`, 409);
 
-  // Idempotency: claim the key before any processing. A retry with the same
-  // key replays the original outcome instead of spending again — agents that
-  // retry after timeouts/parsing errors can never double-spend.
-  let idemKey: string | null = null;
-  if (input.idempotencyKey != null) {
-    const key = cleanStr(input.idempotencyKey, 'idempotencyKey', 128);
-    if (!key) throw new EngineError('idempotencyKey must be a non-empty string.', 422);
-    const claim = store.claimIdempotencyKey(input.agentId, key);
-    if (!claim.fresh) {
-      const ex = claim.existing;
-      if (ex?.ledgerSeq != null) {
-        const entry = store.ledgerEntryBySeq(ex.ledgerSeq);
-        if (entry) {
-          return {
-            intent: {
-              id: entry.intentId,
-              agentId: entry.agentId,
-              amount: entry.amount,
-              currency: entry.currency,
-              vendor: entry.vendor,
-              purpose: entry.purpose,
-              rail: entry.rail,
-            },
-            decision: entry.decision,
-            rule: entry.rule,
-            reason: ex.reason ?? entry.rule,
-            decidedBy: entry.decidedBy,
-            approvalId: entry.approvalId,
-            ledgerSeq: entry.seq,
-          };
+  const start = withImmediateTransaction<SpendResult | { approval: ApprovalRequest; verdict: EvalResult; idemKey: string | null }>(() => {
+    // Idempotency: claim the key before any processing. A retry with the same
+    // key replays the original outcome instead of spending again — agents that
+    // retry after timeouts/parsing errors can never double-spend.
+    let idemKey: string | null = null;
+    if (input.idempotencyKey != null) {
+      const key = cleanStr(input.idempotencyKey, 'idempotencyKey', 128);
+      if (!key) throw new EngineError('idempotencyKey must be a non-empty string.', 422);
+      const claim = store.claimIdempotencyKey(input.agentId, key);
+      if (!claim.fresh) {
+        const ex = claim.existing;
+        if (ex?.ledgerSeq != null) {
+          const entry = store.ledgerEntryBySeq(ex.ledgerSeq);
+          if (entry) {
+            return {
+              requestId: entry.intentId,
+              intent: {
+                id: entry.intentId,
+                agentId: entry.agentId,
+                amount: entry.amount,
+                currency: entry.currency,
+                vendor: entry.vendor,
+                purpose: entry.purpose,
+                rail: entry.rail,
+              },
+              decision: entry.decision,
+              rule: entry.rule,
+              reason: ex.reason ?? entry.rule,
+              decidedBy: entry.decidedBy,
+              approvalId: entry.approvalId,
+              ledgerSeq: entry.seq,
+            };
+          }
         }
+        throw new EngineError(
+          `Duplicate idempotency key "${key}" — its escalation is still awaiting a human decision.`,
+          409,
+        );
       }
-      throw new EngineError(
-        `Duplicate idempotency key "${key}" — its escalation is still awaiting a human decision.`,
-        409,
-      );
+      idemKey = key;
     }
-    idemKey = key;
-  }
 
-  const intent: SpendIntent = {
-    id: randomUUID(),
-    agentId: input.agentId,
-    amount: input.amount,
-    currency,
-    vendor,
-    purpose,
-    rail: input.rail,
-  };
+    const intent: SpendIntent = {
+      id: randomUUID(),
+      agentId: input.agentId,
+      amount: input.amount,
+      currency,
+      vendor,
+      purpose,
+      rail: input.rail,
+    };
 
-  const verdict = evaluate(policy, intent, {
-    spentTodayMinor: store.spentToday(input.agentId),
-    knownVendors: store.knownVendors(input.agentId),
-    now: new Date(),
+    const snapshot = budget.getBudgetSnapshot(input.agentId);
+    if (snapshot.reconciliationRequired) throw new BudgetError('Legacy obligations require operator reconciliation before authorisation.');
+    const verdict = evaluate(policy, intent, {
+      spentTodayMinor: snapshot.spentMinor,
+      reservedMinor: snapshot.reservedMinor,
+      knownVendors: store.knownVendors(input.agentId),
+      now: new Date(),
+    });
+
+    if (verdict.decision === 'ALLOW' || verdict.decision === 'DENY') {
+      const decision: LedgerDecision = verdict.decision === 'ALLOW' ? 'ALLOWED' : 'DENIED';
+      if (decision === 'ALLOWED') reserveIntent(intent);
+      const entry = appendLedger({ intent, decision, rule: verdict.rule, decidedBy: 'policy' });
+      if (idemKey) store.settleIdempotencyKey(input.agentId, idemKey, { ledgerSeq: entry.seq, approvalId: null, reason: verdict.reason });
+      return { requestId: intent.id, intent, decision, rule: verdict.rule, reason: verdict.reason, decidedBy: 'policy', approvalId: null, ledgerSeq: entry.seq };
+    }
+
+    // ESCALATE — park the intent in the approval queue and wait for a human.
+    const approval: ApprovalRequest = {
+      id: randomUUID(),
+      intent,
+      rule: verdict.rule,
+      reason: verdict.reason,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      decidedAt: null,
+      decidedBy: null,
+      note: null,
+    };
+    store.createApproval(approval);
+    return { approval, verdict, idemKey };
   });
-
-  if (verdict.decision === 'ALLOW' || verdict.decision === 'DENY') {
-    const decision: LedgerDecision = verdict.decision === 'ALLOW' ? 'ALLOWED' : 'DENIED';
-    const entry = appendLedger({ intent, decision, rule: verdict.rule, decidedBy: 'policy' });
-    if (idemKey) store.settleIdempotencyKey(input.agentId, idemKey, { ledgerSeq: entry.seq, approvalId: null, reason: verdict.reason });
-    emit({ type: 'ledger', entry });
+  if (!('approval' in start)) {
+    emit({ type: 'ledger', entry: store.ledgerEntryBySeq(start.ledgerSeq) });
     emit({ type: 'state' });
-    return { intent, decision, rule: verdict.rule, reason: verdict.reason, decidedBy: 'policy', approvalId: null, ledgerSeq: entry.seq };
+    return start;
   }
-
-  // ESCALATE — park the intent in the approval queue and wait for a human.
-  const approval: ApprovalRequest = {
-    id: randomUUID(),
-    intent,
-    rule: verdict.rule,
-    reason: verdict.reason,
-    status: 'pending',
-    createdAt: new Date().toISOString(),
-    decidedAt: null,
-    decidedBy: null,
-    note: null,
-  };
-  store.createApproval(approval);
+  const { approval, verdict, idemKey } = start;
+  const intent = approval.intent;
   emit({ type: 'approvals', pending: store.pendingApprovals() });
   emit({ type: 'state' });
 
@@ -170,7 +186,7 @@ export async function submitSpend(input: {
   const entry = appendLedger({
     intent,
     decision: decisionMap[outcome],
-    rule: verdict.rule,
+    rule: outcome === 'approved' && budget.accountingEvents(intent.agentId).some(e => e.requestId === intent.id && e.kind === 'reserved' && e.override) ? `budget-override:${verdict.rule}` : verdict.rule,
     decidedBy: decided,
     approvalId: approval.id,
   });
@@ -186,9 +202,9 @@ export async function submitSpend(input: {
   emit({ type: 'state' });
 
   return {
-    intent,
+    requestId: intent.id, intent,
     decision: decisionMap[outcome],
-    rule: verdict.rule,
+    rule: entry.rule,
     reason: outcome === 'expired' ? 'No human decided in time — escalations expire denied.' : verdict.reason,
     decidedBy: decided,
     approvalId: approval.id,
@@ -197,9 +213,28 @@ export async function submitSpend(input: {
 }
 
 /** Human decision from the console. Returns false if already decided. */
+// Permission expires before execution; #2 must explicitly reconcile execution before releasing a hold.
+export const AUTHORISATION_TTL_MS = 5 * 60 * 1000;
+function reserveIntent(intent: SpendIntent, override?: { operatorId: string; reason: string }): void {
+  const now = new Date();
+  budget.reserveBudget({ requestId: intent.id, agentId: intent.agentId, amountMinor: intent.amount,
+    currency: intent.currency, expiresAt: new Date(now.getTime() + AUTHORISATION_TTL_MS).toISOString(), override }, now);
+}
+
 export function decide(approvalId: string, approve: boolean, by: string, note?: string): boolean {
   const status = approve ? 'approved' : 'rejected';
-  const ok = store.decideApproval(approvalId, status, by, note ?? null);
+  const ok = withImmediateTransaction(() => {
+    const a = store.getApproval(approvalId);
+    if (!a || a.status !== 'pending' || Date.parse(a.createdAt) + APPROVAL_TIMEOUT_MS <= Date.now()) return false;
+    if (approve) {
+      const snapshot = budget.getBudgetSnapshot(a.intent.agentId);
+      const over = snapshot.remainingMinor != null && a.intent.amount > snapshot.remainingMinor;
+      if (over && by === 'decision-link') throw new BudgetError('Budget overrides require an authenticated console operator.');
+      if (over && snapshot.mode === 'approval-override' && !note?.trim()) throw new BudgetError('An explicit override reason is required.', 422);
+      reserveIntent(a.intent, over ? { operatorId: by, reason: note ?? '' } : undefined);
+    }
+    return store.decideApproval(approvalId, status, by, note ?? null);
+  });
   if (!ok) return false;
   resolveWaiter(approvalId, status);
   emit({ type: 'approvals', pending: store.pendingApprovals() });

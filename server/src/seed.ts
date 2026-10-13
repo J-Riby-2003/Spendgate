@@ -12,7 +12,7 @@ const SEED: { agentId: string; displayName: string; currency: string; policy: Om
     currency: 'GBP',
     policy: {
       maxPerTxn: gbp(50),
-      dailyBudget: gbp(500),
+      dailyBudget: gbp(500), budgetMode: 'hard-stop',
       approvalThreshold: gbp(200),
       allowedVendors: '*',
       blockedVendors: ['bobs-discount-emporium'],
@@ -27,7 +27,7 @@ const SEED: { agentId: string; displayName: string; currency: string; policy: Om
     currency: 'USD',
     policy: {
       maxPerTxn: usd(5),
-      dailyBudget: usd(25),
+      dailyBudget: usd(25), budgetMode: 'hard-stop',
       approvalThreshold: usd(10),
       allowedVendors: '*',
       blockedVendors: [],
@@ -42,7 +42,7 @@ const SEED: { agentId: string; displayName: string; currency: string; policy: Om
     currency: 'GBP',
     policy: {
       maxPerTxn: gbp(5000),
-      dailyBudget: gbp(50000),
+      dailyBudget: gbp(50000), budgetMode: 'hard-stop',
       approvalThreshold: gbp(20000),
       allowedVendors: '*',
       blockedVendors: [],
@@ -55,7 +55,7 @@ const SEED: { agentId: string; displayName: string; currency: string; policy: Om
 
 export function seed(): void {
   for (const s of SEED) {
-    store.upsertAgent(s.agentId, s.displayName, s.currency);
+    if (!store.listAgents().some(a => a.agentId === s.agentId)) store.upsertAgent(s.agentId, s.displayName, s.currency);
     if (!store.getPolicy(s.agentId)) {
       store.upsertPolicy({ agentId: s.agentId, ...s.policy });
     }

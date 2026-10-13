@@ -4,6 +4,8 @@ import { assertAgentActive, AuthError, type AgentPrincipal } from './auth.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { submitSpend, EngineError } from './core/engine.js';
+import { budget } from './core/budget-state.js';
+import { BudgetError } from './core/budget.js';
 import { store } from './core/store.js';
 import { formatMinor } from './core/money.js';
 
@@ -21,9 +23,9 @@ export function buildMcpServer(principal: AgentPrincipal): McpServer {
   server.tool(
     'spend',
     `Route a payment intent through SpendGate policy. Returns the decision: ALLOWED, DENIED, APPROVED or REJECTED.
-- Hard violations (blocked vendor, over per-tx max) are denied instantly.
-- Ambiguous cases (over approval threshold, new vendor, over budget, off-hours) escalate to a human and block until decided.
-- Every intent lands in the signed audit ledger regardless of outcome.`,
+- Blocked vendors and hard-stop budget overruns are denied instantly.
+- Ambiguous cases (over approval threshold, new vendor, approval-override budget overrun, off-hours) escalate to a human and block until decided.
+- Permission reserves funds; only verified settlement records completed spend.`,
     {
       agent: z.string().min(1).max(64).optional().describe('Agent id registered in SpendGate, e.g. "procurement-02"'),
       amount: z.number().int().positive().max(1e12).describe('Amount in minor units (pence/cents) — money is never a float'),
@@ -45,7 +47,9 @@ export function buildMcpServer(principal: AgentPrincipal): McpServer {
             type: 'text',
             text: [
               `${result.decision} — ${result.reason}`,
-              `  agent:   ${result.intent.agentId}`,
+              `  request: ${result.requestId}`,
+            `  accounting: authorised permission is not proof of payment`,
+            `  agent:   ${result.intent.agentId}`,
               `  amount:  ${formatMinor(result.intent.amount, result.intent.currency)}`,
               `  vendor:  ${result.intent.vendor}`,
               `  rail:    ${result.intent.rail}`,
@@ -56,8 +60,8 @@ export function buildMcpServer(principal: AgentPrincipal): McpServer {
           }],
         };
       } catch (err) {
-        const msg = err instanceof EngineError ? err.message : String(err);
-        const status = err instanceof EngineError || err instanceof AuthError ? err.status : 500;
+        const msg = (err instanceof EngineError || err instanceof BudgetError) ? err.message : String(err);
+        const status = err instanceof EngineError || err instanceof AuthError || err instanceof BudgetError ? err.status : 500;
         return { isError: true, content: [{ type: 'text', text: `SpendGate error (${status}): ${msg}` }] };
       }
     },
@@ -76,16 +80,19 @@ export function buildMcpServer(principal: AgentPrincipal): McpServer {
       if (!policy) {
         return { isError: true, content: [{ type: 'text', text: `Unknown agent "${agent}".` }] };
       }
-      const spent = store.spentToday(agent);
-      const remaining = policy.dailyBudget != null ? Math.max(0, policy.dailyBudget - spent) : null;
+      const snapshot = budget.getBudgetSnapshot(agent);
       const recent = store.ledgerForAgent(agent, 5);
       return {
         content: [{
           type: 'text',
           text: [
             `Agent: ${agent}`,
-            `Spent today: ${formatMinor(spent, 'GBP')}`, // prototype: report in policy-agnostic form on the ledger page
-            remaining != null ? `Remaining budget: ${formatMinor(remaining, 'GBP')}` : 'Daily budget: unlimited',
+            `Budget mode: ${snapshot.mode}`,
+            `Period: ${snapshot.periodStart} to ${snapshot.periodEnd} (UTC)`,
+            `Completed spend: ${formatMinor(snapshot.spentMinor, snapshot.currency)}`,
+            `Reserved: ${formatMinor(snapshot.reservedMinor, snapshot.currency)}`,
+            snapshot.remainingMinor != null ? `Remaining budget: ${formatMinor(snapshot.remainingMinor, snapshot.currency)}` : 'Daily budget: unlimited',
+            snapshot.reconciliationRequired ? 'Legacy obligations require operator reconciliation before authorisation.' : '',
             '',
             'Recent ledger entries:',
             ...recent.map((e) => `  #${e.seq} ${e.decision.padEnd(8)} ${e.vendor} — ${e.rule}`),

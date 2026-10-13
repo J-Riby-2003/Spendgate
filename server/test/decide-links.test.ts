@@ -16,7 +16,7 @@ const AGENT = 'links-test';
 const POLICY: Policy = {
   agentId: AGENT,
   maxPerTxn: 10_000,
-  dailyBudget: 500_000,
+  dailyBudget: 500_000, budgetMode: 'hard-stop',
   approvalThreshold: 20_000,
   allowedVendors: '*',
   blockedVendors: [],

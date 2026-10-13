@@ -38,10 +38,10 @@ Unit tests run against a throwaway data dir; e2e starts a separate server on :18
 
 ## Design decisions worth knowing
 
-- **Money is integer minor units everywhere** (pence/cents). Never floats.
-- **`spend` takes an optional `idempotencyKey`** — retries after timeouts or parsing errors replay the original decision instead of spending again. Duplicate keys during a pending escalation are rejected with 409.
+- **Money is integer minor units everywhere**, using the configured currency precision. Never floats.
+- **`spend` takes an optional `idempotencyKey`** — retries after timeouts or parsing errors replay the original decision instead of reserving again. Duplicate keys during a pending escalation are rejected with 409.
 - **Default-deny posture**: unknown agent → rejected; no policy → rejected; ambiguous → human.
-- **Deny is rare by design** — blocked vendors only. Over-ceiling spends *escalate*, they don't bounce; the human is the safety valve, and the ledger records who decided.
+- **Budget modes are explicit** — blocked vendors and hard-stop budget overruns deny. Approval-override permits an authenticated operator to exceed available funds with a recorded reason; other ambiguous policy rules escalate.
 - **SQLite via `node:sqlite`** — zero native dependencies, one less thing to break.
 - Signing key lives in `.spendgate/secret.key` (mode 0600), outside the database.
 
@@ -92,10 +92,14 @@ SPENDGATE_PUBLIC_BASE_URL=https://your-tunnel.example
 Then the agent calls `spend(agent, amount, currency, vendor, purpose, rail)` —
 amount in pence/cents.
 
+## Budget accounting
+
+Permission reserves funds; completed spend requires verified settlement. New agents use hard-stop budgets; migrated policies preserve approval-override mode. Operators must review unknown legacy obligations before authorising new work. See [budget-accounting.md](docs/budget-accounting.md) for UTC rollover rules, precision, shared APIs and the #2/#7 integration boundary. This branch does not execute or settle payments.
+
 ## Honest prototype limits (next steps)
 
 - Escalations wait up to 5 min then expire — approvals belong on your phone (WhatsApp/Telegram/push), not just this console.
-- Multi-currency budgets are summed naively (per-agent single currency is fine).
+- Budget accounting uses one configured currency per agent, explicit modes and persistent reservations. See [budget accounting](docs/budget-accounting.md) for migration, reconciliation and execution integration obligations.
 - Agent identity is bound to revocable per-agent credentials. One provisioned operator is supported initially; SSO and multi-workspace tenancy are future work.
 - Ledger signing key is per-server; enterprise wants per-workspace keys + external anchoring (e.g. daily Merkle root).
 - Existing deployments must migrate from the shared token to operator sessions and per-agent credentials. Production requires HTTPS and a configured public console origin; see the migration guide.

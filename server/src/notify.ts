@@ -2,6 +2,7 @@
 // Subscribes to the engine's approval events and pushes a fresh decision-link
 // pair for every new escalation. Fire-and-forget: a failed push never blocks
 // the agent — the console and the expiry timeout remain the fallback.
+import { formatMinor as fmtMoney } from './core/money.js';
 import type { ApprovalRequest } from './core/types.js';
 import type { onEvent } from './core/engine.js';
 import { mintDecisionLinks, type DecisionLink } from './decide-links.js';
@@ -12,9 +13,6 @@ export interface Notifier {
   /** Follow-up after a human decided via link (approve or reject). */
   confirm?(approval: ApprovalRequest, decision: 'approved' | 'rejected'): Promise<void>;
 }
-
-const fmtMoney = (minor: number, currency: string) =>
-  new Intl.NumberFormat('en-GB', { style: 'currency', currency }).format(minor / 100);
 
 /** Telegram HTML parse_mode escaping for user-controlled fields. */
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

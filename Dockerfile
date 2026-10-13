@@ -10,6 +10,7 @@ COPY demo/package.json demo/
 RUN npm ci
 
 # Build the web client, then bring in the server source.
+COPY shared shared
 COPY web web
 RUN npm run build -w web
 COPY server server
