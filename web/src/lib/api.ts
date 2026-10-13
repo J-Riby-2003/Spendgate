@@ -1,8 +1,11 @@
+import { CURRENCIES, currencyPrecision, isSupportedCurrency, parseMinor } from '../../../shared/currency';
+export { CURRENCIES };
 // Shared client types mirroring the server contract.
 export interface Policy {
   agentId: string;
   maxPerTxn: number | null;
   dailyBudget: number | null;
+  budgetMode: 'hard-stop' | 'approval-override';
   approvalThreshold: number | null;
   allowedVendors: string[] | '*';
   blockedVendors: string[];
@@ -17,6 +20,7 @@ export interface AgentState {
   currency: string;
   policy: Policy | null;
   spentToday: number;
+  budget: BudgetSnapshot;
 }
 
 export interface LedgerEntry {
@@ -88,43 +92,42 @@ export function currencySymbol(currency: string): string {
   return SYMBOLS[currency?.toUpperCase()] ?? '';
 }
 
-/** All active ISO 4217 currency codes. */
-export const CURRENCIES = [
-  'AED', 'AFN', 'ALL', 'AMD', 'ANG', 'AOA', 'ARS', 'AUD', 'AWG', 'AZN',
-  'BAM', 'BBD', 'BDT', 'BGN', 'BHD', 'BIF', 'BMD', 'BND', 'BOB', 'BRL',
-  'BSD', 'BTN', 'BWP', 'BYN', 'BZD', 'CAD', 'CDF', 'CHF', 'CLP', 'CNY',
-  'COP', 'CRC', 'CUP', 'CVE', 'CZK', 'DJF', 'DKK', 'DOP', 'DZD', 'EGP',
-  'ERN', 'ETB', 'EUR', 'FJD', 'FKP', 'GBP', 'GEL', 'GHS', 'GIP', 'GMD',
-  'GNF', 'GTQ', 'GYD', 'HKD', 'HNL', 'HTG', 'HUF', 'IDR', 'ILS', 'INR',
-  'IQD', 'IRR', 'ISK', 'JMD', 'JOD', 'JPY', 'KES', 'KGS', 'KHR', 'KMF',
-  'KPW', 'KRW', 'KWD', 'KYD', 'KZT', 'LAK', 'LBP', 'LKR', 'LRD', 'LSL',
-  'LYD', 'MAD', 'MDL', 'MGA', 'MKD', 'MMK', 'MNT', 'MOP', 'MRU', 'MUR',
-  'MVR', 'MWK', 'MXN', 'MYR', 'MZN', 'NAD', 'NGN', 'NIO', 'NOK', 'NPR',
-  'NZD', 'OMR', 'PAB', 'PEN', 'PGK', 'PHP', 'PKR', 'PLN', 'PYG', 'QAR',
-  'RON', 'RSD', 'RUB', 'RWF', 'SAR', 'SBD', 'SCR', 'SDG', 'SEK', 'SGD',
-  'SHP', 'SLE', 'SOS', 'SRD', 'SSP', 'STN', 'SYP', 'SZL', 'THB', 'TJS',
-  'TMT', 'TND', 'TOP', 'TRY', 'TTD', 'TWD', 'TZS', 'UAH', 'UGX', 'USD',
-  'UYU', 'UZS', 'VED', 'VES', 'VND', 'VUV', 'WST', 'XAF', 'XCD', 'XOF',
-  'XPF', 'YER', 'ZAR', 'ZMW', 'ZWL',
-];
-
 export function fmt(amount: number, currency: string): string {
-  const sym = SYMBOLS[currency?.toUpperCase()] ?? `${currency?.toUpperCase() ?? ''} `;
-  const sign = amount < 0 ? '−' : '';
-  const abs = Math.abs(amount);
-  return `${sign}${sym}${Math.floor(abs / 100).toLocaleString('en-GB')}.${String(abs % 100).padStart(2, '0')}`;
+  const code = currency?.toUpperCase() ?? '';
+  if (!isSupportedCurrency(code)) return `${amount} ${code} atomic units`;
+  const precision = currencyPrecision(code), scale = 10 ** precision;
+  const sym = SYMBOLS[code] ?? `${code} `, sign = amount < 0 ? '−' : '', abs = Math.abs(amount);
+  return `${sign}${sym}${Math.floor(abs / scale).toLocaleString('en-GB')}${precision ? `.${String(abs % scale).padStart(precision, '0')}` : ''}`;
 }
-
-/** Pounds/dollars input → minor units. Null = invalid (blank is handled by the caller). */
-export function toMinor(units: string): number | null {
-  const n = Number(units);
-  if (!Number.isFinite(n) || n < 0 || n > 1e10) return null;
-  return Math.round(n * 100);
-}
-
-export function minorToUnits(minor: number | null): string {
+export function toMinor(units: string, currency = 'GBP'): number | null { return parseMinor(units, currency); }
+export function minorToUnits(minor: number | null, currency = 'GBP'): string {
   if (minor == null) return '';
-  return (minor / 100).toString();
+  if (!isSupportedCurrency(currency)) return String(minor);
+  const precision = currencyPrecision(currency), scale = 10 ** precision;
+  const fraction = String(Math.abs(minor) % scale).padStart(precision, '0').replace(/0+$/, '');
+  return `${Math.trunc(minor / scale)}${fraction ? `.${fraction}` : ''}`;
+}
+
+export interface BudgetSnapshot {
+  agentId: string; currency: string; precision: number | null; mode: 'hard-stop' | 'approval-override';
+  limitMinor: number | null; spentMinor: number; reservedMinor: number; remainingMinor: number | null;
+  periodStart: string; periodEnd: string; timezone: 'UTC'; reconciliationRequired: boolean;
+}
+export interface LegacyObligation {
+  ledgerSeq: number; requestId: string; amountMinor: number; currency: string; ts: string;
+  vendor: string; purpose: string; disposition: string | null; executionStatus: string;
+  evidence: string | null; operatorId: string | null; reason: string | null;
+}
+export interface ReconciliationPreview { budget: BudgetSnapshot; obligations: LegacyObligation[]; events: unknown[] }
+export async function fetchReconciliation(agentId: string): Promise<ReconciliationPreview> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/budget/reconciliation`);
+  await checkOk(res, 'reconciliation'); return res.json();
+}
+export async function reconcileLegacy(agentId: string, review: { ledgerSeq: number; action: string; reason: string; evidence?: string; eventId: string }): Promise<void> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/budget/reconciliation`, {
+    method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify(review),
+  });
+  await checkOk(res, 'reconciliation');
 }
 
 // Operator session secret stays in an HttpOnly cookie; CSRF token stays in memory.

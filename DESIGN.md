@@ -123,3 +123,7 @@ title-case words. No exclamation marks, no emojis, no "delight".
 ## Monochrome brand rule
 
 No decorative gold accents. Active navigation uses a paper-coloured border, primary buttons use paper with dark text, and hashes and code labels use paper. Both allowed and human-approved decisions use green. Amber is reserved for pending approval indicators, never navigation or primary actions.
+
+## Budget accounting controls
+
+Agent policy cards show completed spend, reserved funds and remaining budget separately, including unlimited budgets and negative remaining values after an override. Show the daily UTC period beside balances. Permission is not proof of payment. Add a labelled Budget mode select (Hard stop / Approval override) using the existing input styling, with a terse explanation of the selected mode. Legacy reconciliation uses bordered rows and labelled controls, a plain-language attestation preserving unknown history, evidence and reason fields, and the existing confirmation modal before recording a disposition. Error copy uses the danger colour; no new visual tokens.

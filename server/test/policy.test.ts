@@ -6,7 +6,7 @@ import type { Policy, SpendIntent } from '../src/core/types.js';
 const POLICY: Policy = {
   agentId: 'a',
   maxPerTxn: 10_000,
-  dailyBudget: 50_000,
+  dailyBudget: 50_000, budgetMode: 'hard-stop',
   approvalThreshold: 20_000,
   allowedVendors: '*',
   blockedVendors: ['evil-corp'],
@@ -82,7 +82,7 @@ describe('evaluate', () => {
   });
 
   it('escalates when the intent would exceed dailyBudget', () => {
-    const p: Policy = { ...POLICY, maxPerTxn: null, approvalThreshold: null };
+    const p: Policy = { ...POLICY, budgetMode: 'approval-override', maxPerTxn: null, approvalThreshold: null };
     expect(evaluate(p, intent({ amount: 45_000 }), { ...CTX, spentTodayMinor: 5_000 }).decision).toBe('ALLOW'); // exactly at budget
     expect(evaluate(p, intent({ amount: 45_000 }), { ...CTX, spentTodayMinor: 5_001 }).rule).toBe('over-daily-budget');
   });
@@ -99,4 +99,13 @@ describe('isRail', () => {
     expect(isRail('x402')).toBe(true);
     expect(isRail('wire')).toBe(false);
   });
+});
+
+it('hard-stop budget includes reservations and takes precedence over softer rules', () => {
+  const p = { ...POLICY, budgetMode: 'hard-stop' as const, allowedVendors: ['elsewhere'] };
+  expect(evaluate(p, intent(), { ...CTX, reservedMinor: 46000 })).toMatchObject({ decision: 'DENY', rule: 'over-daily-budget' });
+});
+it('approval-override budget escalates overruns and UTC context is independent of server timezone', () => {
+  const p = { ...POLICY, budgetMode: 'approval-override' as const, allowedDays: [4] };
+  expect(evaluate(p, intent(), { ...CTX, reservedMinor: 46000 })).toMatchObject({ decision: 'ESCALATE', rule: 'over-daily-budget' });
 });

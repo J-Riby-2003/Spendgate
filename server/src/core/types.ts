@@ -22,6 +22,7 @@ export interface Policy {
   /** Minor units. Null = unlimited / unset. */
   maxPerTxn: number | null;
   dailyBudget: number | null;
+  budgetMode: 'hard-stop' | 'approval-override';
   /** amount >= threshold escalates to a human. */
   approvalThreshold: number | null;
   /** '*' = any vendor, otherwise allowlist. */
@@ -30,7 +31,7 @@ export interface Policy {
   newVendorRequiresApproval: boolean;
   /** 0 = Sunday … 6 = Saturday. '*' = any day. */
   allowedDays: number[] | '*';
-  /** Local-time window, e.g. { start: '08:00', end: '20:00' }. Null = any hour. */
+  /** UTC window, e.g. { start: '08:00', end: '20:00' }. Null = any hour. */
   allowedWindow: { start: string; end: string } | null;
 }
 
@@ -73,6 +74,6 @@ export interface AgentState {
   agentId: string;
   displayName: string;
   policy: Policy;
-  spentToday: number; // minor units, summed across currencies as-is (prototype simplification)
+  spentToday: number; // completed spend attributed to the current UTC authorisation period
   currency: string;
 }

@@ -72,6 +72,35 @@ CREATE INDEX idx_credentials_agent ON agent_credentials(agent_id);
 CREATE TABLE security_audit_events (seq INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, event TEXT NOT NULL, operator_id TEXT NOT NULL, agent_id TEXT, credential_id TEXT, replacement_id TEXT);
 CREATE TABLE login_attempts (key TEXT PRIMARY KEY, failures INTEGER NOT NULL, reset_at INTEGER NOT NULL);
 `) },
+  { id: 'issue03_001_budget_policy_modes', up(db) {
+    for (const row of db.prepare('SELECT agent_id, json FROM policies').all()) {
+      const policy = JSON.parse(String(row.json));
+      policy.budgetMode ??= 'approval-override';
+      db.prepare('UPDATE policies SET json = ? WHERE agent_id = ?').run(JSON.stringify(policy), row.agent_id);
+    }
+  } },
+  { id: 'issue03_002_reservation_accounting', up(db) { db.exec(`
+    CREATE TABLE budget_reservations (
+      request_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, amount INTEGER NOT NULL CHECK(amount > 0),
+      currency TEXT NOT NULL, period_start TEXT NOT NULL, expires_at TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('reserved','settled','released')), terminal_cause TEXT,
+      created_at TEXT NOT NULL, finalised_at TEXT
+    );
+    CREATE INDEX idx_budget_agent ON budget_reservations(agent_id, currency, status, period_start);
+    CREATE TABLE budget_accounting_events (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT NOT NULL UNIQUE,
+      request_id TEXT NOT NULL, agent_id TEXT NOT NULL, kind TEXT NOT NULL,
+      ts TEXT NOT NULL, payload TEXT NOT NULL
+    );
+  `); } },
+  { id: 'issue03_003_legacy_reconciliation', up(db) { db.exec(`
+    CREATE TABLE legacy_budget_obligations (
+      ledger_seq INTEGER PRIMARY KEY, agent_id TEXT NOT NULL,
+      disposition TEXT, evidence TEXT, operator_id TEXT, reason TEXT, reconciled_at TEXT
+    );
+    INSERT INTO legacy_budget_obligations (ledger_seq, agent_id)
+      SELECT seq, agent_id FROM ledger WHERE decision IN ('ALLOWED','APPROVED');
+  `); } },
 ];
 
 /** Append immutable, uniquely named migrations; never renumber deployed IDs. */

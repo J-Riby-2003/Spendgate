@@ -29,7 +29,7 @@ beforeAll(async () => {
   process.env.SPENDGATE_PUBLIC_BASE_URL = base;
   for (const agentId of ['alpha', 'beta']) {
     store.upsertAgent(agentId, agentId, 'GBP');
-    store.upsertPolicy({ agentId, maxPerTxn: 1000, dailyBudget: 10000, approvalThreshold: 2000, allowedVendors: '*', blockedVendors: [], newVendorRequiresApproval: false, allowedDays: '*', allowedWindow: null });
+    store.upsertPolicy({ agentId, maxPerTxn: 1000, dailyBudget: 10000, budgetMode: 'hard-stop', approvalThreshold: 2000, allowedVendors: '*', blockedVendors: [], newVendorRequiresApproval: false, allowedDays: '*', allowedWindow: null });
     appendLedger({ intent: { id: agentId, agentId, amount: 10, currency: 'GBP', vendor: `${agentId}-secret-vendor`, purpose: 'private', rail: 'mcp' }, decision: 'ALLOWED', rule: 'test', decidedBy: 'policy' });
   }
   alpha = issueCredential('alpha', operatorId);

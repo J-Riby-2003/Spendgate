@@ -10,11 +10,14 @@ import { seed } from './seed.js';
 import { buildMcpServer } from './mcp.js';
 import { decide, expireStale, onEvent, emit, EngineError } from './core/engine.js';
 import { cleanHhmm, cleanMinor, cleanStr, cleanVendorList, InputError } from './core/sanitize.js';
-import { store, db } from './core/store.js';
+import { store, db, withImmediateTransaction } from './core/store.js';
 import { verifyLedger, ledgerToCsv } from './core/ledger.js';
-import { requireOperator, requireAgent, requireCsrf, requireOrigin, allowedOrigin, sessionToken, authenticateSession, assertAgentActive, authEvents, login, logout, csrfToken, SESSION_COOKIE, cookieOptions, AuthError, issueCredential, listCredentials, rotateCredential, revokeCredential, revokeAgentCredentials, type OperatorPrincipal } from './auth.js';
+import { requireOperator, requireAgent, requireCsrf, requireOrigin, allowedOrigin, sessionToken, authenticateSession, assertAgentActive, authEvents, login, logout, csrfToken, SESSION_COOKIE, cookieOptions, AuthError, issueCredential, listCredentials, rotateCredential, revokeCredential, deleteAgentWithCredentials, type OperatorPrincipal } from './auth.js';
 import { mintDecisionLinks, decideByToken, hashToken } from './decide-links.js';
 import { attachNotifier, resolveNotifier } from './notify.js';
+import { budget } from './core/budget-state.js';
+import { BudgetError, type ReconcileInput } from './core/budget.js';
+import { isSupportedCurrency } from '../../shared/currency.js';
 import type { Policy } from './core/types.js';
 
 export function createApplication() {
@@ -34,10 +37,11 @@ function buildState() {
   const agents = store.listAgents().map((a) => ({
     ...a,
     policy: store.getPolicy(a.agentId),
-    spentToday: store.spentToday(a.agentId),
+    spentToday: budget.getBudgetSnapshot(a.agentId).spentMinor,
+    budget: budget.getBudgetSnapshot(a.agentId),
   }));
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  today.setUTCHours(0, 0, 0, 0);
   const allToday = store.fullLedger().filter((e) => e.ts >= today.toISOString());
   return {
     agents,
@@ -168,10 +172,13 @@ app.put('/api/policies/:agentId', (req, res) => {
     if (allowedDays !== '*' && !(Array.isArray(allowedDays) && allowedDays.length <= 7 && allowedDays.every((d) => Number.isInteger(d) && d >= 0 && d <= 6))) {
       throw new InputError('allowedDays must be "*" or a list of weekday indices 0–6 (0 = Sunday).');
     }
+    const mode = b.budgetMode ?? store.getPolicy(agentId)?.budgetMode ?? 'hard-stop';
+    if (mode !== 'hard-stop' && mode !== 'approval-override') throw new InputError('Invalid budget mode.');
     const policy: Policy = {
       agentId,
       maxPerTxn: cleanMinor(b.maxPerTxn, 'maxPerTxn'),
       dailyBudget: cleanMinor(b.dailyBudget, 'dailyBudget'),
+      budgetMode: mode,
       approvalThreshold: cleanMinor(b.approvalThreshold, 'approvalThreshold'),
       allowedVendors,
       blockedVendors,
@@ -182,7 +189,8 @@ app.put('/api/policies/:agentId', (req, res) => {
         end: cleanHhmm(b.allowedWindow.end, 'Window end'),
       },
     };
-    store.upsertPolicy(policy);
+    withImmediateTransaction(() => store.upsertPolicy(policy));
+    emit({ type: 'state' });
     res.json({ ok: true, policy });
   } catch (err) {
     if (err instanceof InputError) return res.status(422).json({ error: err.message });
@@ -195,8 +203,7 @@ app.delete('/api/agents/:agentId', (req, res) => {
   if (!store.listAgents().some((a) => a.agentId === agentId)) {
     return res.status(404).json({ error: `Unknown agent "${agentId}".` });
   }
-  revokeAgentCredentials(agentId, (res.locals.principal as OperatorPrincipal).operatorId);
-  store.deleteAgent(agentId);
+  deleteAgentWithCredentials(agentId, (res.locals.principal as OperatorPrincipal).operatorId);
   emit({ type: 'state' });
   res.json({ ok: true });
 });
@@ -206,8 +213,8 @@ app.patch('/api/agents/:agentId/currency', (req, res) => {
   const agent = store.listAgents().find((a) => a.agentId === agentId);
   if (!agent) return res.status(404).json({ error: `Unknown agent "${agentId}".` });
   const currency = String(req.body?.currency ?? '').toUpperCase();
-  if (!/^[A-Z]{3}$/.test(currency)) return res.status(422).json({ error: 'currency must be a 3-letter ISO 4217 code.' });
-  store.upsertAgent(agentId, agent.displayName, currency);
+  if (!isSupportedCurrency(currency)) return res.status(422).json({ error: 'Unsupported currency.' });
+  withImmediateTransaction(() => store.upsertAgent(agentId, agent.displayName, currency));
   emit({ type: 'state' });
   res.json({ ok: true, currency });
 });
@@ -222,13 +229,14 @@ app.post('/api/agents', (req, res) => {
       return res.status(409).json({ error: 'Agent already exists.' });
     }
     const displayName = cleanStr(req.body?.displayName, 'displayName', 80, true) ?? agentId;
-    const cur = (currency ?? 'GBP').toUpperCase();
-    if (!/^[A-Z]{3}$/.test(cur)) throw new InputError('currency must be a 3-letter ISO 4217 code.');
+    const cur = typeof currency === 'string' ? currency.toUpperCase() : currency == null ? 'GBP' : '';
+    if (!isSupportedCurrency(cur)) throw new InputError('Unsupported currency.');
+    withImmediateTransaction(() => {
     store.upsertAgent(agentId, displayName, cur);
     store.upsertPolicy({
       agentId,
       maxPerTxn: 5000,
-      dailyBudget: 50000,
+      dailyBudget: 50000, budgetMode: 'hard-stop',
       approvalThreshold: 20000,
       allowedVendors: '*',
       blockedVendors: [],
@@ -236,11 +244,28 @@ app.post('/api/agents', (req, res) => {
       allowedDays: '*',
       allowedWindow: null,
     });
+    });
+    emit({ type: 'state' });
     res.status(201).json({ ok: true });
   } catch (err) {
     if (err instanceof InputError) return res.status(422).json({ error: err.message });
     throw err;
   }
+});
+
+// Operator-only preview and evidence-backed recovery; no generic operator payment-completion API.
+app.get('/api/agents/:agentId/budget/reconciliation', (req, res) => {
+  res.json({ budget: budget.getBudgetSnapshot(req.params.agentId), obligations: budget.legacyObligations(req.params.agentId), events: budget.accountingEvents(req.params.agentId) });
+});
+app.post('/api/agents/:agentId/budget/reconciliation', (req, res) => {
+  const input = req.body ?? {};
+  if (!Number.isSafeInteger(input.ledgerSeq) || input.ledgerSeq < 1) throw new BudgetError('A legacy ledger sequence is required.', 422);
+  if (!budget.legacyObligations(req.params.agentId).some(o => o.ledgerSeq === input.ledgerSeq)) throw new BudgetError('Unknown legacy obligation.', 404);
+  const review: ReconcileInput = { ledgerSeq: input.ledgerSeq, action: input.action, eventId: input.eventId,
+    evidence: input.evidence, reason: input.reason, operatorId: (res.locals.principal as OperatorPrincipal).operatorId };
+  withImmediateTransaction(() => budget.reconcileLegacy(review));
+  emit({ type: 'state' });
+  res.json({ budget: budget.getBudgetSnapshot(req.params.agentId), obligations: budget.legacyObligations(req.params.agentId) });
 });
 
 // ---------- MCP (Streamable HTTP, stateless) ----------
@@ -321,6 +346,7 @@ app.post('/api/decide/:token', (req, res) => {
 
 // error handler
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err instanceof BudgetError) return res.status(err.status).json({ error: err.message });
   if (err instanceof AuthError) return res.status(err.status).json({ error: err.message });
   if (err instanceof EngineError) return res.status(err.status).json({ error: err.message });
   if (err instanceof InputError) return res.status(422).json({ error: err.message });

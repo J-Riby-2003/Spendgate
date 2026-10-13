@@ -16,7 +16,7 @@ const AGENT = 'notify-test';
 const POLICY: Policy = {
   agentId: AGENT,
   maxPerTxn: 10_000,
-  dailyBudget: 500_000,
+  dailyBudget: 500_000, budgetMode: 'hard-stop',
   approvalThreshold: 20_000,
   allowedVendors: '*',
   blockedVendors: [],
@@ -156,4 +156,17 @@ it('does not log secret-bearing upstream errors when notification delivery fails
     decide(store.pendingApprovals().at(-1)!.id, false, 'cleanup');
     await result; capture.mockRestore();
   }
+});
+it('renders zero- and three-decimal approval amounts correctly in delivered notification bodies', async () => {
+  const bodies: any[] = [];
+  const notifier = telegramNotifier({ botToken: 'test', chatId: 'test', baseUrl: 'https://gate.example', fetchImpl: async (_url, init) => {
+    bodies.push(JSON.parse(String(init?.body))); return new Response('{}', { status: 200 });
+  } });
+  const base = { id: 'precision-notify', rule: 'test', reason: 'test', status: 'pending' as const, createdAt: new Date().toISOString(), decidedAt: null, decidedBy: null, note: null };
+  for (const currency of ['JPY', 'KWD']) await notifier.send({ ...base, intent: { id: currency, agentId: AGENT, amount: 1000, currency, vendor: 'vendor', purpose: 'precision', rail: 'mcp' } }, [
+    { action: 'approve', token: 'test', path: '/decide/test' }, { action: 'reject', token: 'test2', path: '/decide/test2' },
+  ]);
+  expect(bodies[0].text).toContain('1,000');
+  expect(bodies[0].text).not.toContain('10.00');
+  expect(bodies[1].text).toContain('1.000');
 });
