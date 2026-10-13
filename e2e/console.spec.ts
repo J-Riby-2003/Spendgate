@@ -2,43 +2,36 @@
 // unlock, and a full agent-escalation → human-approval cycle (the product's
 // core loop) driven through the real UI against the real server.
 import { expect, test } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { BASE, agentHeaders, signIn } from './helpers';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-const TOKEN = readFileSync(new URL('../.spendgate/console.token', import.meta.url), 'utf8').trim();
-const AUTH = { Authorization: `Bearer ${TOKEN}` };
-
-async function unlock(page: import('@playwright/test').Page) {
+test('sign-in gate blocks the console until authenticated', async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('Console token').fill(TOKEN);
-  await page.getByRole('button', { name: 'Unlock' }).click();
-  await expect(page.locator('aside')).toBeVisible();
-}
-
-test('token gate blocks the console until unlocked', async ({ page }) => {
-  await page.goto('/');
-  await expect(page.getByLabel('Console token')).toBeVisible();
+  await expect(page.getByLabel('Username', { exact: true })).toBeVisible();
   await expect(page.locator('aside')).toBeHidden();
   // read-only promise: no way past the gate without the token
-  await expect(page.getByText('Console is read-only.')).toBeVisible();
+  expect((await page.request.get('/api/state')).status()).toBe(401);
 });
 
-test('unlocking with the console token opens the console', async ({ page }) => {
-  await unlock(page);
+test('signing in opens the console and logout invalidates access', async ({ page }) => {
+  await signIn(page);
   await expect(page.getByRole('button', { name: 'Approvals' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Agents' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Ledger' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Audit Ledger', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByLabel('Password', { exact: true })).toBeVisible();
+  expect((await page.request.get('/api/state')).status()).toBe(401);
 });
 
 test('agent escalation is approved by a human in the console', async ({ page }) => {
-  await unlock(page);
+  await signIn(page);
 
   // an agent spends over its human-approval threshold over real MCP —
   // the call blocks until a human decides, exactly as in production
   const client = new Client({ name: 'spendgate-e2e-agent', version: '0.1.0' });
-  const transport = new StreamableHTTPClientTransport(new URL('http://localhost:8787/mcp'), {
-    requestInit: { headers: AUTH },
+  const transport = new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), {
+    requestInit: { headers: await agentHeaders('procurement-02') },
   });
   await client.connect(transport);
   const purpose = `E2E approval test ${Date.now()}`;
@@ -68,4 +61,27 @@ test('agent escalation is approved by a human in the console', async ({ page }) 
 
   // this escalation leaves the queue (other pending items may legitimately exist)
   await expect(page.locator('div.rounded-lg', { hasText: purpose })).toHaveCount(0);
+});
+
+test('invalid password stays locked and credential secrets are shown only on issuance', async ({ page }) => {
+  await page.goto('/');
+  await page.getByLabel('Username', { exact: true }).fill('test-operator');
+  await page.getByLabel('Password', { exact: true }).fill('wrong');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Invalid username or password');
+  await expect(page.locator('aside')).toBeHidden();
+  await signIn(page);
+  await page.getByRole('button', { name: 'Agents & Policy', exact: true }).click();
+  const section = page.getByRole('region', { name: 'Credentials for procurement-02' });
+  await section.getByRole('button', { name: 'Issue credential', exact: true }).click();
+  await expect(section.getByLabel('New credential')).toBeVisible();
+  const raw = await section.getByLabel('New credential').inputValue();
+  expect(raw.length).toBe(43);
+  await section.getByRole('button', { name: 'I have saved it' }).click();
+  await expect(section.getByLabel('New credential')).toHaveCount(0);
+  await page.reload();
+  await page.getByRole('button', { name: 'Agents & Policy', exact: true }).click();
+  await expect(section.getByLabel('New credential')).toHaveCount(0);
+  expect(await page.evaluate(() => sessionStorage.getItem('sg-token'))).toBeNull();
+  await page.screenshot({ path: 'test-results/agents-access.png', fullPage: true });
 });

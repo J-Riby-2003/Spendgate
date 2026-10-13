@@ -127,44 +127,48 @@ export function minorToUnits(minor: number | null): string {
   return (minor / 100).toString();
 }
 
-// --- console auth (bearer token, kept in sessionStorage) ---
+// Operator session secret stays in an HttpOnly cookie; CSRF token stays in memory.
 let onUnauthorized: (() => void) | null = null;
-
-/** App registers this so a 401 on any mutation can trigger the token gate. */
-export function setUnauthorizedHandler(fn: () => void): void {
+let csrf = '';
+export function setUnauthorizedHandler(fn: () => void): () => void {
   onUnauthorized = fn;
+  return () => { if (onUnauthorized === fn) onUnauthorized = null; };
 }
-
-export function hasConsoleToken(): boolean {
-  return !!sessionStorage.getItem('sg-token');
+export async function loadSession(): Promise<boolean> {
+  const res = await fetch('/api/auth/session');
+  if (res.status === 401) { csrf = ''; return false; }
+  await checkOk(res, 'session');
+  csrf = (await res.json()).csrfToken;
+  return true;
 }
-
-export function setConsoleToken(token: string): void {
-  sessionStorage.setItem('sg-token', token);
+export async function signIn(username: string, password: string): Promise<void> {
+  const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+  await checkOk(res, 'sign in');
+  csrf = (await res.json()).csrfToken;
+  sessionStorage.removeItem('sg-token'); // discard obsolete shared-token storage
 }
-
-export function clearConsoleToken(): void {
-  sessionStorage.removeItem('sg-token');
+export async function signOut(): Promise<void> {
+  const res = await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() });
+  await checkOk(res, 'sign out');
+  csrf = '';
 }
-
 function authHeaders(base?: Record<string, string>): Record<string, string> {
-  const token = sessionStorage.getItem('sg-token');
-  return token ? { ...base, Authorization: `Bearer ${token}` } : { ...base };
+  return { ...base, 'X-CSRF-Token': csrf };
 }
 
 async function checkOk(res: Response, label: string): Promise<void> {
   if (res.ok) return;
-  if (res.status === 401) {
-    onUnauthorized?.();
-    throw new Error(`unauthorized: ${label}`);
-  }
   const body = await res.json().catch(() => ({}));
+  if (res.status === 401) {
+    csrf = '';
+    onUnauthorized?.();
+  }
   throw new Error(body.error ?? `${label} ${res.status}`);
 }
 
 export async function fetchState(): Promise<State> {
   const res = await fetch('/api/state');
-  if (!res.ok) throw new Error(`state ${res.status}`);
+  await checkOk(res, 'state');
   return res.json();
 }
 
@@ -172,7 +176,7 @@ export async function decideApproval(id: string, approve: boolean, note?: string
   const res = await fetch(`/api/approvals/${id}/decide`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ approve, by: 'james', note }),
+    body: JSON.stringify({ approve, note }),
   });
   await checkOk(res, 'decide');
 }
@@ -207,4 +211,24 @@ export async function addAgent(agentId: string, displayName: string, currency: s
     body: JSON.stringify({ agentId, displayName, currency }),
   });
   await checkOk(res, 'add agent');
+}
+
+export interface Credential { id: string; agentId: string; createdAt: number; revokedAt: number | null }
+export async function listCredentials(agentId: string): Promise<Credential[]> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/credentials`);
+  await checkOk(res, 'credentials'); return res.json();
+}
+export async function issueCredential(agentId: string, rotateId?: string): Promise<{ id: string; secret: string }> {
+  const path = `/api/agents/${encodeURIComponent(agentId)}/credentials${rotateId ? `/${encodeURIComponent(rotateId)}/rotate` : ''}`;
+  const res = await fetch(path, { method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }), body: '{}' });
+  await checkOk(res, 'issue credential'); return res.json();
+}
+export async function revokeCredential(agentId: string, id: string): Promise<void> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(agentId)}/credentials/${encodeURIComponent(id)}`, { method: 'DELETE', headers: authHeaders() });
+  await checkOk(res, 'revoke credential');
+}
+
+export async function recordActivity(): Promise<void> {
+  const res = await fetch('/api/auth/activity', { method: 'POST', headers: authHeaders() });
+  await checkOk(res, 'session activity');
 }

@@ -16,8 +16,9 @@ type Event =
   | { type: 'approvals'; pending: unknown[] }
   | { type: 'state' };
 const listeners = new Set<(e: Event) => void>();
-export function onEvent(fn: (e: Event) => void): void {
+export function onEvent(fn: (e: Event) => void): () => void {
   listeners.add(fn);
+  return () => listeners.delete(fn);
 }
 export function emit(e: Event): void {
   for (const fn of listeners) fn(e);

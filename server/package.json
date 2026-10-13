@@ -7,7 +7,8 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "operator:provision": "tsx src/provision-operator.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.24.0",

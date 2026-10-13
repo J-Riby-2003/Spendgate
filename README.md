@@ -11,18 +11,19 @@ lands in a SHA-256 hash-chained, HMAC-signed audit ledger.
 
 ```bash
 npm install
-npm run dev        # server :8787 + console :7100
+npm run operator:provision -w server -- operator  # hidden password prompt, once
+npm run dev        # server :8787 + console :7100; sign in with that operator
 npm run demo       # in a second terminal — 5 scenarios through every decision path
 ```
 
 ## Test it
 
 ```bash
-npm run test       # 55 unit tests: sanitize guards, policy rules, ledger chain, engine, idempotency, decision links
-npm run test:e2e   # builds the web app, then Playwright on :8787: token gate, console approval, phone decision link
+npm run test       # unit and integration tests: policy, ledger, identity, access control, MCP, WebSocket and decision links
+npm run test:e2e   # builds the web app, then Playwright on :8787: sign-in/logout, credential issuance, console approval, phone decision link
 ```
 
-Unit tests run against a throwaway data dir; e2e drives the dev servers (reuses the running ones).
+Unit tests run against a throwaway data dir; e2e starts a separate server on :18871 with temporary data and never reuses live servers.
 
 ## What's inside
 
@@ -53,19 +54,19 @@ Any MCP client (Claude Code, Claude Desktop, your own):
   "mcpServers": {
     "spendgate": {
       "url": "http://localhost:8787/mcp",
-      "headers": { "Authorization": "Bearer <console-token>" }
+      "headers": { "Authorization": "Bearer <agent-credential>" }
     }
   }
 }
 ```
 
-The console token is in `.spendgate/console.token` (auto-generated, mode 0600; override with `SPENDGATE_TOKEN`). Mutations and the MCP endpoint require it as a `Bearer` token; read-only GETs and the `/ws` feed stay open.
+Issue a scoped credential from the signed-in console under Agents & Policy. Each credential is bound to one agent; operators use expiring browser sessions. Console reads, exports and `/ws` require an operator session. See [access and migration](docs/access-and-migration.md) before upgrading an existing deployment.
 
 ## Phone approvals (decision links)
 
-Any pending escalation can be decided from a phone, no console token needed:
+Any pending escalation can be decided from a phone, no operator session needed:
 
-1. `GET /api/approvals/:id/links` (bearer token) mints a one-time approve/reject link pair.
+1. `GET /api/approvals/:id/links` (operator session) mints a one-time approve/reject link pair.
 2. Opening `/decide/<token>` shows the request; one tap decides permanently — the agent's blocked call resolves and the decision lands in the signed ledger as `human:decision-link`.
 3. Links are single-use, expire with the escalation, and a retap shows the spent/expired state honestly.
 
@@ -95,9 +96,9 @@ amount in pence/cents.
 
 - Escalations wait up to 5 min then expire — approvals belong on your phone (WhatsApp/Telegram/push), not just this console.
 - Multi-currency budgets are summed naively (per-agent single currency is fine).
-- Agent identity is self-declared — real deployments need API keys / agent identity (Skyfire, Nevermined-style attestation).
+- Agent identity is bound to revocable per-agent credentials. One provisioned operator is supported initially; SSO and multi-workspace tenancy are future work.
 - Ledger signing key is per-server; enterprise wants per-workspace keys + external anchoring (e.g. daily Merkle root).
-- One console bearer token protects all mutations + MCP (`server/src/auth.ts`); read-only GETs and `/ws` are open. Still don't expose :8787 to the internet — per-agent API keys are the real fix.
+- Existing deployments must migrate from the shared token to operator sessions and per-agent credentials. Production requires HTTPS and a configured public console origin; see the migration guide.
 
 ## Kill conditions (from the idea doc)
 

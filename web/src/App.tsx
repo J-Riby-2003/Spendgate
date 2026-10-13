@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { fetchState, hasConsoleToken, setConsoleToken, setUnauthorizedHandler, type State } from './lib/api';
+import { fetchState, loadSession, signIn, signOut, recordActivity, setUnauthorizedHandler, type State } from './lib/api';
 import { LANG_LABELS, LANGS, useLang, type Lang } from './lib/i18n';
 import Overview from './pages/Overview';
 import Approvals from './pages/Approvals';
@@ -22,61 +22,78 @@ export default function App() {
   const [connected, setConnected] = useState(false);
   const { lang, setLang, t } = useLang();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [authed, setAuthed] = useState(() => hasConsoleToken());
-  const [tokenInput, setTokenInput] = useState('');
+  const [authed, setAuthed] = useState(false);
+  const [checking, setChecking] = useState(true);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [busy, setBusy] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
+  const sessionVersion = useRef(0);
 
   const changeLanguage = (l: Lang) => setLang(l);
 
   const refresh = useCallback(() => {
-    fetchState().then(setState).catch(() => undefined);
+    const version = sessionVersion.current;
+    fetchState().then(next => { if (version === sessionVersion.current) setState(next); }).catch(() => undefined);
   }, []);
 
+  const clearSession = useCallback(() => {
+    sessionVersion.current++; setAuthed(false); setState(null); setConnected(false); wsRef.current?.close();
+  }, []);
   useEffect(() => {
-    setUnauthorizedHandler(() => setAuthed(false));
+    const unregister = setUnauthorizedHandler(clearSession);
+    loadSession().then(setAuthed).catch(() => setAuthError('Unable to reach the server.')).finally(() => setChecking(false));
+    return unregister;
+  }, [clearSession]);
+  useEffect(() => {
+    if (!authed) return;
     refresh();
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     const ws = new WebSocket(`${proto}://${location.host}/ws`);
     wsRef.current = ws;
     ws.onopen = () => setConnected(true);
-    ws.onclose = () => setConnected(false);
-    ws.onmessage = () => refresh(); // any event → reload snapshot (small data, always consistent)
-    return () => ws.close();
-  }, [refresh]);
+    ws.onclose = (event) => { setConnected(false); if (event.code === 4001) clearSession(); };
+    ws.onmessage = () => refresh();
+    // HTTP activity renews idle time only while the operator uses the console.
+    const recheck = () => { if (document.visibilityState === 'visible') refresh(); };
+    let lastActivity = 0;
+    const activity = () => { if (Date.now() - lastActivity >= 30_000) { lastActivity = Date.now(); recordActivity().catch(() => undefined); } };
+    const sessionCheck = setInterval(() => { loadSession().then(valid => { if (!valid) clearSession(); }).catch(() => undefined); }, 30_000);
+    window.addEventListener('focus', recheck);
+    window.addEventListener('pointerdown', activity);
+    window.addEventListener('keydown', activity);
+    return () => { clearInterval(sessionCheck); ws.close(); window.removeEventListener('focus', recheck); window.removeEventListener('pointerdown', activity); window.removeEventListener('keydown', activity); };
+  }, [authed, clearSession, refresh]);
 
   const pending = state?.stats.pendingApprovals ?? 0;
 
+  if (checking) return <p className="p-8 text-paper">Checking session…</p>;
   if (!authed) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center px-4">
         <div className="w-full max-w-sm">
           <p className="font-wordmark text-2xl font-semibold tracking-[0.04em] text-paper">SPENDGATE</p>
           <p className="font-mono text-[13px] tracking-[0.04em] text-paper mt-2">
-            Console is read-only. Enter the console token to approve requests, edit policies, or manage agents.
+            Sign in to manage agents, policies and approvals.
           </p>
           <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const token = tokenInput.trim();
-              if (!token) return;
-              setConsoleToken(token);
-              setAuthed(true);
-              refresh();
+            onSubmit={async (e) => {
+              e.preventDefault(); setBusy(true); setAuthError('');
+              try { await signIn(username, password); setPassword(''); setAuthed(true); }
+              catch (err) { setAuthError(err instanceof Error ? err.message : 'Sign in failed'); }
+              finally { setBusy(false); }
             }}
-            className="mt-6 flex gap-2"
+            className="mt-6 flex flex-col gap-3"
           >
-            <input
-              type="password"
-              value={tokenInput}
-              onChange={(e) => setTokenInput(e.target.value)}
-              aria-label="Console token"
-              placeholder="Console token"
-              autoComplete="off"
-              className="flex-1 min-w-0 h-10 bg-black border border-line rounded-md px-3 font-mono text-[13px] tracking-[0.04em] text-paper placeholder:text-paper/40 focus:outline-none focus:border-white"
-            />
-            <button type="submit" className="h-10 px-4 shrink-0 bg-white text-bg rounded-md font-mono text-[13px] font-semibold hover:bg-paper">
-              Unlock
-            </button>
+            <label className="text-paper text-sm">Username
+              <input value={username} onChange={e => setUsername(e.target.value)} autoComplete="username" required maxLength={64} className="mt-1 w-full h-10 bg-black border border-line rounded-md px-3 text-paper" />
+            </label>
+            <label className="text-paper text-sm">Password
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required maxLength={1024} className="mt-1 w-full h-10 bg-black border border-line rounded-md px-3 text-paper" />
+            </label>
+            {authError && <p role="alert" className="text-danger text-sm">{authError}</p>}
+            <button disabled={busy} type="submit" className="h-10 px-4 bg-paper text-bg rounded-md text-sm disabled:opacity-50">{busy ? 'Signing in…' : 'Sign in'}</button>
           </form>
         </div>
       </div>
@@ -144,6 +161,8 @@ export default function App() {
               <option key={l} value={l} className="bg-black text-paper">{LANG_LABELS[l]}</option>
             ))}
           </select>
+          <button className="mt-3 text-paper text-sm" onClick={async () => { setAuthError(''); try { await signOut(); clearSession(); } catch { setAuthError('Sign out failed. Try again.'); } }}>Sign out</button>
+          {authError && <p role="alert" className="text-danger text-sm">{authError}</p>}
           <Mono className="block mt-3 text-[11px] tracking-[0.04em]">{t('side.copyright')}</Mono>
         </div>
       </aside>

@@ -8,12 +8,9 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { readFileSync } from 'node:fs';
 
 const ENDPOINT = process.env.SPENDGATE_URL ?? 'http://localhost:8787/mcp';
-// mutations + MCP are bearer-protected; read the console token the server generated
-const TOKEN = (process.env.SPENDGATE_TOKEN ?? readFileSync(new URL('../.spendgate/console.token', import.meta.url), 'utf8')).trim();
-const AUTH = { Authorization: `Bearer ${TOKEN}` };
+const credentials = JSON.parse(process.env.SPENDGATE_AGENT_CREDENTIALS ?? '{}');
 // per-run nonce so idempotency keys are hermetic across runs
 const RUN = Date.now().toString(36);
 let failures = 0;
@@ -24,9 +21,15 @@ function report(name, ok, detail) {
   if (!ok) failures++;
 }
 
-const client = new Client({ name: 'spendgate-smoke-agent', version: '0.1.0' });
-const transport = new StreamableHTTPClientTransport(new URL(ENDPOINT), { requestInit: { headers: AUTH } });
-await client.connect(transport);
+const clients = new Map();
+async function clientFor(agentId) {
+  if (clients.has(agentId)) return clients.get(agentId);
+  if (!credentials[agentId]) throw new Error(`Missing scoped credential for ${agentId}; see docs/access-and-migration.md`);
+  const client = new Client({ name: 'spendgate-smoke-agent', version: '0.1.0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL(ENDPOINT), { requestInit: { headers: { Authorization: `Bearer ${credentials[agentId]}` } } }));
+  clients.set(agentId, client); return client;
+}
+const client = await clientFor('finance-01');
 
 // 1. discover tools, like an agent does on connect
 const { tools } = await client.listTools();
@@ -36,7 +39,7 @@ report(
   tools.map((t) => `• ${t.name} — ${t.description?.split('\n')[0]}`).join('\n'),
 );
 
-const call = (name, args) => client.callTool({ name, arguments: args });
+const call = async (name, args) => (await clientFor(args.agent === 'procurement-02' ? 'procurement-02' : 'finance-01')).callTool({ name, arguments: args }, undefined, { timeout: 330_000 });
 
 // 2. an in-policy spend → should be auto-ALLOWED instantly
 const allowed = await call('spend', {
@@ -89,8 +92,8 @@ report('budget_status', budget.isError !== true, budget.content?.[0]?.text);
 const ledger = await call('audit_ledger', { limit: 5 });
 const ledgerText = ledger.content?.[0]?.text ?? '';
 report(
-  'audit_ledger contains both decisions',
-  ledgerText.includes('ALLOWED') && ledgerText.includes('DENIED'),
+  'audit_ledger is restricted to the authenticated agent',
+  ledgerText.includes('finance-01') && !ledgerText.includes('procurement-02'),
   ledgerText.split('\n').slice(0, 6).join('\n'),
 );
 
@@ -129,16 +132,7 @@ report(
   dupText.split('\n')[0],
 );
 
-// release the escalation via the console API, first call should resolve APPROVED
-const stateRes = await fetch('http://localhost:8787/api/approvals').then((r) => r.json());
-const pending = (stateRes.pending ?? []).find((a) => a.intent?.purpose === 'Idempotency escalation test');
-if (pending) {
-  await fetch(`http://localhost:8787/api/approvals/${pending.id}/decide`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', ...AUTH },
-    body: JSON.stringify({ approve: true, by: 'smoke-test' }),
-  });
-}
+console.log('Approve the Idempotency escalation test in the operator console; the agent has no operator credentials.');
 const escResult = await escPromise;
 const escText = escResult?.content?.[0]?.text ?? '';
 report(
@@ -156,6 +150,6 @@ report(
   escReplayText.split('\n')[0],
 );
 
-await client.close();
+for (const connection of clients.values()) await connection.close();
 console.log(failures === 0 ? '\nAll checks passed — SpendGate works over real MCP.' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);
