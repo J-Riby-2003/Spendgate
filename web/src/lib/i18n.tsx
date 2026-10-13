@@ -64,6 +64,7 @@ const D: Dict = {
   // nav
   'nav.overview': ['Overview', 'Übersicht', 'Aperçu', 'Resumen', 'Panoramica', 'Visão geral', '概要', '概览'],
   'nav.approvals': ['Approvals', 'Genehmigungen', 'Approbations', 'Aprobaciones', 'Approvazioni', 'Aprovações', '承認', '审批'],
+  'nav.onboarding': ['Set up an agent', 'Agent einrichten', 'Configurer un agent', 'Configurar un agente', 'Configura un agente', 'Configurar um agente', 'エージェント設定', '设置代理'],
   'nav.agents': ['Agents & Policy', 'Agenten & Richtlinie', 'Agents et politique', 'Agentes y política', 'Agenti e policy', 'Agentes e política', 'エージェントとポリシー', '代理与策略'],
   'nav.ledger': ['Audit Ledger', 'Prüfhauptbuch', "Registre d'audit", 'Registro de auditoría', 'Registro di audit', 'Livro de auditoria', '監査台帳', '审计账本'],
 

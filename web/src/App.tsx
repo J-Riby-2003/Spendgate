@@ -5,14 +5,16 @@ import Overview from './pages/Overview';
 import Approvals from './pages/Approvals';
 import Agents from './pages/Agents';
 import Ledger from './pages/Ledger';
+import Onboarding from './pages/Onboarding';
 import { Mono } from './components/ui';
 
-type Page = 'overview' | 'approvals' | 'agents' | 'ledger';
+type Page = 'overview' | 'approvals' | 'agents' | 'ledger' | 'onboarding';
 
 const NAV: { id: Page; label: string }[] = [
   { id: 'overview', label: 'nav.overview' },
   { id: 'approvals', label: 'nav.approvals' },
   { id: 'agents', label: 'nav.agents' },
+  { id: 'onboarding', label: 'nav.onboarding' },
   { id: 'ledger', label: 'nav.ledger' },
 ];
 
@@ -172,9 +174,10 @@ export default function App() {
       <main className="flex-1 min-w-0 px-4 sm:px-6 lg:px-10 py-6 sm:py-7 max-w-6xl mx-auto w-full">
         {state ? (
           <>
-            {page === 'overview' && <Overview state={state} />}
+            {page === 'overview' && <>{state.agents.length === 0 && <div className="border border-line rounded-lg p-5 mb-6 text-paper"><p className="text-sm mb-3">No agents registered. Create your first agent and test its policy safely.</p><button className="h-10 px-4 bg-paper text-bg rounded-md text-sm" onClick={() => setPage('onboarding')}>Set up your first agent</button></div>}<Overview state={state} /></>}
             {page === 'approvals' && <Approvals state={state} refresh={refresh} />}
-            {page === 'agents' && <Agents state={state} />}
+            {page === 'agents' && <><button className="mb-5 h-10 px-4 bg-paper text-bg rounded-md text-sm" onClick={() => setPage('onboarding')}>Guided agent setup</button><Agents state={state} /></>}
+            {page === 'onboarding' && <Onboarding key={sessionVersion.current} />}
             {page === 'ledger' && <Ledger state={state} />}
           </>
         ) : (

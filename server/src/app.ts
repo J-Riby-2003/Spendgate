@@ -7,6 +7,9 @@ import { join } from 'node:path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { seed } from './seed.js';
+import { registerAgent } from './core/agents.js';
+import { startJourney, listJourneys, ownedJourney, journeyView, saveDraft, abandonJourney, OnboardingError } from './core/onboarding-store.js';
+import { createChallenge, testJourney, completeJourney } from './core/onboarding.js';
 import { buildMcpServer } from './mcp.js';
 import { finaliseApproval, expireStale, onEvent, emit, EngineError } from './core/engine.js';
 import { cleanStr, InputError } from './core/sanitize.js';
@@ -29,7 +32,7 @@ app.use((_req, res, next) => { res.setHeader('Referrer-Policy', 'no-referrer'); 
 app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 app.use(express.json({ limit: '256kb' }));
 
-seed();
+if (process.env.SPENDGATE_SEED_DEMO !== 'false') seed();
 expireStale(); // reconcile overdue durable requests before accepting traffic or delivering links
 
 // push a decision-link pair to Telegram (if configured) for every new escalation
@@ -104,10 +107,12 @@ app.get('/api/security-audit', (_req, res) => {
 });
 app.get('/api/agents/:agentId/credentials', (req, res) => res.json(listCredentials(req.params.agentId)));
 app.post('/api/agents/:agentId/credentials', (req, res) => {
-  res.status(201).json(issueCredential(req.params.agentId, (res.locals.principal as OperatorPrincipal).operatorId));
+  const operatorId = (res.locals.principal as OperatorPrincipal).operatorId;
+  res.status(201).json(req.body?.onboardingId === undefined ? issueCredential(req.params.agentId, operatorId) : issueCredential(req.params.agentId, operatorId, req.body.onboardingId));
 });
 app.post('/api/agents/:agentId/credentials/:credentialId/rotate', (req, res) => {
-  res.status(201).json(rotateCredential(req.params.agentId, req.params.credentialId, (res.locals.principal as OperatorPrincipal).operatorId));
+  const operatorId = (res.locals.principal as OperatorPrincipal).operatorId;
+  res.status(201).json(req.body?.onboardingId === undefined ? rotateCredential(req.params.agentId, req.params.credentialId, operatorId) : rotateCredential(req.params.agentId, req.params.credentialId, operatorId, req.body.onboardingId));
 });
 app.delete('/api/agents/:agentId/credentials/:credentialId', (req, res) => {
   revokeCredential(req.params.agentId, req.params.credentialId, (res.locals.principal as OperatorPrincipal).operatorId);
@@ -237,38 +242,19 @@ app.patch('/api/agents/:agentId/currency', (req, res) => {
 });
 
 app.post('/api/agents', (req, res) => {
-  try {
-    const { agentId, currency } = req.body ?? {};
-    if (typeof agentId !== 'string' || !/^[a-z0-9-]{2,64}$/.test(agentId)) {
-      return res.status(422).json({ error: 'agentId must be 2–64 chars of a-z, 0-9, dash.' });
-    }
-    if (store.listAgents().some((a) => a.agentId === agentId)) {
-      return res.status(409).json({ error: 'Agent already exists.' });
-    }
-    const displayName = cleanStr(req.body?.displayName, 'displayName', 80, true) ?? agentId;
-    const cur = typeof currency === 'string' ? currency.toUpperCase() : currency == null ? 'GBP' : '';
-    if (!isSupportedCurrency(cur)) throw new InputError('Unsupported currency.');
-    withImmediateTransaction(() => {
-    store.upsertAgent(agentId, displayName, cur);
-    store.upsertPolicy({
-      agentId,
-      maxPerTxn: 5000,
-      dailyBudget: 50000, budgetMode: 'hard-stop',
-      approvalThreshold: 20000,
-      allowedVendors: '*',
-      blockedVendors: [],
-      newVendorRequiresApproval: true,
-      allowedDays: '*',
-      allowedWindow: null,
-    }, { changedBy: (res.locals.principal as OperatorPrincipal).operatorId, source: 'operator' });
-    });
-    emit({ type: 'state' });
-    res.status(201).json({ ok: true });
-  } catch (err) {
-    if (err instanceof InputError) return res.status(422).json({ error: err.message });
-    throw err;
-  }
+  const result = registerAgent(req.body ?? {}, (res.locals.principal as OperatorPrincipal).operatorId);
+  emit({ type: 'state' });
+  res.status(result.created ? 201 : 200).json({ ok: true, ...result });
 });
+
+app.get('/api/onboarding', (_req, res) => res.json(listJourneys((res.locals.principal as OperatorPrincipal).operatorId)));
+app.post('/api/onboarding', (req, res) => res.json(startJourney((res.locals.principal as OperatorPrincipal).operatorId, req.body?.requestId)));
+app.get('/api/onboarding/:id', (req, res) => res.json(journeyView(ownedJourney(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId))));
+app.patch('/api/onboarding/:id', (req, res) => res.json(saveDraft(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId, req.body?.expectedRevision, req.body?.draft)));
+app.post('/api/onboarding/:id/challenge', (req, res) => res.json(createChallenge(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId)));
+app.post('/api/onboarding/:id/test', (req, res) => res.json(testJourney(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId, req.body?.sample)));
+app.post('/api/onboarding/:id/abandon', (req, res) => res.json(abandonJourney(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId)));
+app.post('/api/onboarding/:id/complete', (req, res) => res.json(completeJourney(req.params.id, (res.locals.principal as OperatorPrincipal).operatorId)));
 
 // Operator-only preview and evidence-backed recovery; no generic operator payment-completion API.
 app.get('/api/agents/:agentId/budget/reconciliation', (req, res) => {
@@ -366,6 +352,7 @@ app.post('/api/decide/:token', (req, res) => {
 
 // error handler
 app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err instanceof OnboardingError) return res.status(err.status).json({ error: err.message });
   if (err instanceof PolicyConflict) return res.status(err.status).json({ error: err.message });
   if (err instanceof BudgetError) return res.status(err.status).json({ error: err.message });
   if (err instanceof AuthError) return res.status(err.status).json({ error: err.message });

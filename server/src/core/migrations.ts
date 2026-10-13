@@ -200,6 +200,19 @@ CREATE TABLE login_attempts (key TEXT PRIMARY KEY, failures INTEGER NOT NULL, re
     }
   } },
 
+  { id: 'issue05_001_onboarding', up(db) { db.exec(`
+    CREATE TABLE onboarding_sessions (
+      id TEXT PRIMARY KEY, operator_id TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+      draft_json TEXT NOT NULL DEFAULT '{}', agent_id TEXT, setup_json TEXT, credential_id TEXT, agent_policy_version INTEGER,
+      connected_at TEXT, tested_at TEXT, completed_at TEXT, abandoned_at TEXT,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX idx_onboarding_active ON onboarding_sessions(operator_id) WHERE completed_at IS NULL AND abandoned_at IS NULL;
+    CREATE TABLE onboarding_challenges (
+      token_hash TEXT PRIMARY KEY, onboarding_id TEXT NOT NULL, agent_id TEXT NOT NULL,
+      credential_id TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER
+    );
+  `); } },
 ];
 
 /** Append immutable, uniquely named migrations; never renumber deployed IDs. */
