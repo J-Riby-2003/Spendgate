@@ -15,10 +15,9 @@ files directly; they'll be regenerated from this document.
 | `line` | `#2E2B23` | Borders, dividers, table grid |
 | `paper` | `#F4F1E8` | Primary text |
 | `muted` | `#8A8474` | Secondary text, metadata, timestamps |
-| `gold` | `#C8A96A` | Accent — decisions, sequence numbers, primary buttons |
-| `golddim` | `#8A7449` | De-emphasised accent (unused today — free for you) |
-| `ok` | `#7D8F5C` | Allowed / approved-positive, chain-verified |
-| `danger` | `#B4552D` | Denied / rejected, chain broken, destructive actions |
+| `pending` | `#E8A020` | Pending approval status only |
+| `ok` | `#4CAF50` | Allowed / approved-positive, chain-verified |
+| `danger` | `#E0522A` | Denied / rejected, chain broken, destructive actions |
 
 Badge fills are solid, vibrant tone colours with dark (`bg`-coloured) text —
 no opacity washes, no gradients. Nothing glows.
@@ -71,7 +70,7 @@ tones (`#4CAF50` / `#E8A020` / `#E0522A`) or white.
 ### Badge (decision tiles)
 `rounded-md`, **solid vibrant fill**, white 9px sentence-case label, 4% tracking.
 Vibrant hexes (not the pastel design tokens): allowed `#4CAF50` ·
-approved/pending `#E8A020` · denied/rejected `#E0522A` · expired `#8A8474`.
+approved `#4CAF50` · pending `#E8A020` · denied/rejected `#E0522A` · expired `#8A8474`.
 
 ### Buttons
 - **Primary (save / register):** solid white `paper` (`#F4F1E8`), dark text,
@@ -80,7 +79,7 @@ approved/pending `#E8A020` · denied/rejected `#E0522A` · expired `#8A8474`.
 - **Confirmations:** destructive or policy-changing actions (save policy,
   remove blocked vendor) open a centred modal on `bg-black/80` before
   committing — white Confirm for saves, red Remove for unblocking.
-No amber buttons — amber is reserved for the "approved/pending" status meaning.
+No amber buttons — amber is reserved for the "pending" status meaning.
 No shadows, no gradients on any button.
 
 ### Budget bar
@@ -107,7 +106,7 @@ marketing copy, no slogans — this is an operator console, not a landing page.
 
 ### Sidebar
 `bg` fill, `line` right border, wordmark top, nav in title case with subtle
-(4%) tracking, active item = `gold` left edge bar + paper text, status dot +
+(4%) tracking, active item = `paper` left edge bar + paper text, status dot +
 `© 2026 Britannic & Balkan` pinned at the bottom. Sticky (`top-0 h-screen`) —
 it does not scroll with the page.
 
@@ -119,5 +118,8 @@ title-case words. No exclamation marks, no emojis, no "delight".
 
 ## 6. Current deviations / TODO
 
-- `golddim` is defined but unused — waiting for a use (subtle chart lines?).
 - Landing site (`../spendgate-landing/`) does **not** follow this system yet.
+
+## Monochrome brand rule
+
+No decorative gold accents. Active navigation uses a paper-coloured border, primary buttons use paper with dark text, and hashes and code labels use paper. Both allowed and human-approved decisions use green. Amber is reserved for pending approval indicators, never navigation or primary actions.

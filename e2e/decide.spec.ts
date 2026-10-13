@@ -2,18 +2,15 @@
 // public /decide/<token> link — no console token on the phone — and the
 // blocked MCP call resolves, the link dies, and a retap shows the used state.
 import { expect, test } from '@playwright/test';
-import { readFileSync } from 'node:fs';
+import { BASE, agentHeaders, operatorHeaders } from './helpers';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-
-const TOKEN = readFileSync(new URL('../.spendgate/console.token', import.meta.url), 'utf8').trim();
-const AUTH = { Authorization: `Bearer ${TOKEN}` };
 
 test('decision link approves an escalation from the phone page', async ({ page }) => {
   // an agent spends over its ceiling — the call blocks until a human decides
   const client = new Client({ name: 'spendgate-e2e-phone', version: '0.1.0' });
-  const transport = new StreamableHTTPClientTransport(new URL('http://localhost:8787/mcp'), {
-    requestInit: { headers: AUTH },
+  const transport = new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), {
+    requestInit: { headers: await agentHeaders('procurement-02') },
   });
   await client.connect(transport);
   const purpose = `E2E decide-link test ${Date.now()}`;
@@ -32,14 +29,14 @@ test('decision link approves an escalation from the phone page', async ({ page }
   // the escalation lands in the queue
   let approval: { id: string } | undefined;
   for (let i = 0; i < 50 && !approval; i++) {
-    const list = await fetch('http://localhost:8787/api/approvals').then((r) => r.json());
+    const list = await fetch(`${BASE}/api/approvals`, { headers: await operatorHeaders() }).then((r) => r.json());
     approval = (list.pending as { id: string; intent: { purpose: string } }[]).find((a) => a.intent.purpose === purpose);
     if (!approval) await new Promise((r) => setTimeout(r, 200));
   }
   expect(approval).toBeDefined();
 
   // the operator mints a phone link (bearer-protected endpoint)
-  const { links } = await fetch(`http://localhost:8787/api/approvals/${approval!.id}/links`, { headers: AUTH })
+  const { links } = await fetch(`${BASE}/api/approvals/${approval!.id}/links`, { headers: await operatorHeaders() })
     .then((r) => r.json()) as { links: { action: string; path: string }[] };
   const approvePath = links.find((l) => l.action === 'approve')!.path;
 

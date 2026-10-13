@@ -22,7 +22,7 @@ function EntryDetail({ e, leaving }: { e: LedgerEntry; leaving: boolean }) {
             <Mono>purpose: {e.purpose}</Mono>
             <Mono>approval: {e.approvalId ?? '—'}</Mono>
             <Mono className="col-span-2 break-all">prev hash: {e.prevHash}</Mono>
-            <Mono className="col-span-2 break-all text-[#E8A020]/80">hash: {e.hash}</Mono>
+            <Mono className="col-span-2 break-all text-paper">hash: {e.hash}</Mono>
             <Mono className="col-span-2 break-all">signature: {e.signature}</Mono>
           </div>
         </div>

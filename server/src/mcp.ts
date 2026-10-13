@@ -1,3 +1,4 @@
+import { assertAgentActive, AuthError, type AgentPrincipal } from './auth.js';
 // MCP server: this is what agents actually talk to.
 // One tool is the product: `spend` — route a payment intent through policy.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -6,7 +7,12 @@ import { submitSpend, EngineError } from './core/engine.js';
 import { store } from './core/store.js';
 import { formatMinor } from './core/money.js';
 
-export function buildMcpServer(): McpServer {
+export function buildMcpServer(principal: AgentPrincipal): McpServer {
+  function scopedAgent(supplied?: string): string {
+    assertAgentActive(principal);
+    if (supplied !== undefined && supplied !== principal.agentId) throw new AuthError('Agent identity mismatch', 403);
+    return principal.agentId;
+  }
   const server = new McpServer(
     { name: 'spendgate', version: '0.1.0' },
     { capabilities: { tools: {} } },
@@ -19,7 +25,7 @@ export function buildMcpServer(): McpServer {
 - Ambiguous cases (over approval threshold, new vendor, over budget, off-hours) escalate to a human and block until decided.
 - Every intent lands in the signed audit ledger regardless of outcome.`,
     {
-      agent: z.string().min(1).max(64).describe('Agent id registered in SpendGate, e.g. "procurement-02"'),
+      agent: z.string().min(1).max(64).optional().describe('Agent id registered in SpendGate, e.g. "procurement-02"'),
       amount: z.number().int().positive().max(1e12).describe('Amount in minor units (pence/cents) — money is never a float'),
       currency: z.string().regex(/^[A-Za-z]{3}$/).describe('ISO 4217, e.g. GBP, USD'),
       vendor: z.string().min(1).max(120).describe('Who gets paid'),
@@ -31,7 +37,7 @@ export function buildMcpServer(): McpServer {
     },
     async (args) => {
       try {
-        const result = await submitSpend({ ...args, agentId: args.agent });
+        const result = await submitSpend({ ...args, agentId: scopedAgent(args.agent) });
         const ok = result.decision === 'ALLOWED' || result.decision === 'APPROVED';
         return {
           isError: !ok,
@@ -51,7 +57,7 @@ export function buildMcpServer(): McpServer {
         };
       } catch (err) {
         const msg = err instanceof EngineError ? err.message : String(err);
-        const status = err instanceof EngineError ? err.status : 500;
+        const status = err instanceof EngineError || err instanceof AuthError ? err.status : 500;
         return { isError: true, content: [{ type: 'text', text: `SpendGate error (${status}): ${msg}` }] };
       }
     },
@@ -61,9 +67,11 @@ export function buildMcpServer(): McpServer {
     'budget_status',
     'Check an agent\'s remaining daily budget and recent ledger entries.',
     {
-      agent: z.string().describe('Agent id'),
+      agent: z.string().optional().describe('Agent id; must match credential'),
     },
-    async ({ agent }) => {
+    async ({ agent: supplied }) => {
+      let agent: string;
+      try { agent = scopedAgent(supplied); } catch { return { isError: true, content: [{ type: 'text', text: 'Unauthorized or agent identity mismatch' }] }; }
       const policy = store.getPolicy(agent);
       if (!policy) {
         return { isError: true, content: [{ type: 'text', text: `Unknown agent "${agent}".` }] };
@@ -94,8 +102,10 @@ export function buildMcpServer(): McpServer {
       agent: z.string().optional().describe('Filter by agent id'),
       limit: z.number().int().positive().max(200).default(20),
     },
-    async ({ agent, limit }) => {
-      const entries = agent ? store.ledgerForAgent(agent, limit) : store.recentLedger(limit);
+    async ({ agent: supplied, limit }) => {
+      let agent: string;
+      try { agent = scopedAgent(supplied); } catch { return { isError: true, content: [{ type: 'text', text: 'Unauthorized or agent identity mismatch' }] }; }
+      const entries = store.ledgerForAgent(agent, limit);
       return {
         content: [{
           type: 'text',

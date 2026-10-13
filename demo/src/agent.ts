@@ -4,39 +4,26 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
 const BASE = process.env.SPENDGATE_URL ?? 'http://localhost:8787';
-const AUTO_APPROVE_AFTER_MS = 8000;
-
-const transport = new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`));
-const client = new Client({ name: 'demo-agent', version: '0.1.0' });
-await client.connect(transport);
-
-console.log('Connected to SpendGate MCP. Running scenarios…\n');
+const credentials: Record<string, string> = JSON.parse(process.env.SPENDGATE_AGENT_CREDENTIALS ?? '{}');
+const clients = new Map<string, Client>();
+async function clientFor(agentId: string): Promise<Client> {
+  const existing = clients.get(agentId);
+  if (existing) return existing;
+  const credential = credentials[agentId];
+  if (!credential) throw new Error(`Issue a scoped credential for ${agentId} and set SPENDGATE_AGENT_CREDENTIALS. See docs/access-and-migration.md.`);
+  const client = new Client({ name: 'demo-agent', version: '0.1.0' });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${credential}` } } }));
+  clients.set(agentId, client);
+  return client;
+}
+console.log('Running scoped-agent scenarios. Decide escalations in the operator console.\n');
 
 async function spend(args: {
   agent: string; amount: number; currency: string; vendor: string; purpose: string; rail: string;
 }, label: string) {
   console.log(`▶ ${label}`);
-  const call = client.callTool({ name: 'spend', arguments: args });
-  // For escalations, pretend to be the human: approve via the console API after a beat,
-  // matching the pending approval by agent + vendor + amount.
-  const timer = setTimeout(async () => {
-    try {
-      const res = await fetch(`${BASE}/api/approvals`);
-      const data = await res.json() as { pending: { id: string; intent: { agentId: string; vendor: string; amount: number } }[] };
-      const match = data.pending.find((p) =>
-        p.intent.agentId === args.agent && p.intent.vendor === args.vendor && p.intent.amount === args.amount);
-      if (match) {
-        console.log('  …a human (the demo script) approved it in the console');
-        await fetch(`${BASE}/api/approvals/${match.id}/decide`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ approve: true, by: 'james (demo)' }),
-        });
-      }
-    } catch { /* approval may already be resolved */ }
-  }, AUTO_APPROVE_AFTER_MS);
-  const res = await call;
-  clearTimeout(timer);
+  const client = await clientFor(args.agent);
+  const res = await client.callTool({ name: 'spend', arguments: args }, undefined, { timeout: 330_000 });
   const text = (res.content as { type: string; text: string }[]).map((c) => c.text).join('\n');
   console.log(text.split('\n').map((l) => `  ${l}`).join('\n'));
   console.log();
@@ -73,5 +60,5 @@ await spend({
 }, 'Scenario 5 — procurement-02 tries a blocked vendor (expect DENIED)');
 
 console.log('Done. Open the dashboard to see the ledger: every decision above is hash-chained and signed.');
-await client.close();
+for (const client of clients.values()) await client.close();
 process.exit(0);

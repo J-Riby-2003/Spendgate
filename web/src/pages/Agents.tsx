@@ -1,3 +1,4 @@
+import Credentials from '../components/Credentials';
 import { useState } from 'react';
 import {
   addAgent, CURRENCIES, currencySymbol, fmt, minorToUnits, removeAgent, savePolicy, setCurrency, toMinor,
@@ -214,6 +215,8 @@ function PolicyEditor({ agent }: { agent: AgentState }) {
         </button>
         {error && !confirmSave && <Mono className="text-[#E0522A]">{error}</Mono>}
       </div>
+
+      <Credentials agentId={agent.agentId} />
 
       {confirmSave && (
         <ConfirmModal
