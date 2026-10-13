@@ -3,10 +3,20 @@ import { BASE, agentHeaders, operatorHeaders, signIn } from './helpers';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
+async function updatePolicy(id: string, headers: Record<string, string>, patch: Record<string, unknown>) {
+  const response = await fetch(`${BASE}/api/state`, { headers });
+  expect(response.status).toBe(200);
+  const agent = (await response.json()).agents.find((agent: { agentId: string }) => agent.agentId === id);
+  expect(agent).toBeTruthy();
+  const saved = await fetch(`${BASE}/api/policies/${id}`, { method: 'PUT', headers,
+    body: JSON.stringify({ ...agent.policy, ...patch, expectedVersion: agent.policyVersion }) });
+  expect(saved.status).toBe(200);
+}
+
 async function fixture(id: string, mode = 'hard-stop') {
   const headers = { ...await operatorHeaders(), 'Content-Type': 'application/json' };
   expect((await fetch(`${BASE}/api/agents`, { method:'POST', headers, body:JSON.stringify({agentId:id,displayName:'Review Agent',currency:'GBP'}) })).status).toBe(201);
-  expect((await fetch(`${BASE}/api/policies/${id}`, {method:'PUT',headers,body:JSON.stringify({dailyBudget:10000,maxPerTxn:1000,budgetMode:mode,newVendorRequiresApproval:false})})).status).toBe(200);
+  await updatePolicy(id, headers, { dailyBudget: 10000, maxPerTxn: 1000, budgetMode: mode, newVendorRequiresApproval: false });
   const client = new Client({name:'context-browser',version:'1'});
   await client.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), {requestInit:{headers:await agentHeaders(id)}}));
   async function spend(purpose: string, amount = 5000) {
@@ -68,7 +78,7 @@ test('budget competition disables hard-stop approval and explicit override requi
     await page.evaluate(()=>window.scrollTo(0,0));
     await page.screenshot({path:'test-results/approval-context-desktop.png',fullPage:true});
     // A newer policy closes the override. Submission must recheck even with the old preview.
-    await fetch(`${BASE}/api/policies/context-override`,{method:'PUT',headers:f.headers,body:JSON.stringify({dailyBudget:10000,maxPerTxn:1000,budgetMode:'hard-stop'})});
+    await updatePolicy('context-override', f.headers, { dailyBudget: 10000, maxPerTxn: 1000, budgetMode: 'hard-stop' });
     await page.reload(); await page.getByRole('button',{name:/^Approvals/}).click();
     await expect(card.getByRole('button',{name:'Approve',exact:true})).toBeDisabled();
     await expect(card.getByText(/Hard-stop mode does not permit an override/)).toBeVisible();
