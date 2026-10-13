@@ -11,8 +11,8 @@
 - [x] Test and enforce console HTTP/MCP/WebSocket access and authenticated decision attribution.
 - [x] Update console sign-in/logout and one-time credential management; validate browser flows with temporary data/ports.
 - [x] Update demo and smoke clients and document deployment migration/shared contracts.
-- [ ] Independent whole-branch review and fix material findings.
-- [ ] Final validation, push and draft PR.
+- [x] Independent whole-branch review and fix material findings.
+- [x] Final validation, push and draft PR #8 (https://github.com/J-Riby-2003/spendgate/pull/8).
 
 Review focus: anonymous read/export leakage; identity mismatch in every MCP tool; background traffic defeating idle expiry; credential revocation during an active approval stream; upgrades preserving existing ledger values and capability links.
 
@@ -31,3 +31,5 @@ Execution record:
 - Final: Ruling: Keep conservative socket-source and account login throttling, documenting shared-proxy impact. Cost: legitimate attempts behind one proxy can share a temporary lockout.
 - Final: Ruling: Leave durable approval finalisation/recovery to issue #7. Revoking credentials preserves existing pending rows and the active engine waiter; this branch does not add restart recovery semantics. Cost: inherited recovery limits remain until #7 lands.
 - Standalone client verification: all smoke checks and five demo scenarios passed with separate scoped agent connections on a fresh database and ephemeral port; operator approvals ran in a separate harness.
+
+Final validation: 79 unit/integration tests, five browser tests, server/web/demo typechecks and the production web build passed. Primary eight-file patch compared byte-for-byte unchanged. No merge or deployment.
