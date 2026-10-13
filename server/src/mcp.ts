@@ -3,17 +3,34 @@ import { assertAgentActive, AuthError, type AgentPrincipal } from './auth.js';
 // One tool is the product: `spend` — route a payment intent through policy.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { submitSpend, EngineError } from './core/engine.js';
+import { submitRequest, waitForRequest, getRequest, EngineError, type RequestSnapshot } from './core/engine.js';
 import { budget } from './core/budget-state.js';
 import { BudgetError } from './core/budget.js';
 import { store } from './core/store.js';
 import { formatMinor } from './core/money.js';
 
-export function buildMcpServer(principal: AgentPrincipal): McpServer {
+export function buildMcpServer(principal: AgentPrincipal, connectionSignal?: AbortSignal): McpServer {
   function scopedAgent(supplied?: string): string {
     assertAgentActive(principal);
     if (supplied !== undefined && supplied !== principal.agentId) throw new AuthError('Agent identity mismatch', 403);
     return principal.agentId;
+  }
+  function response(result: RequestSnapshot) {
+    return { isError: !['ALLOWED', 'APPROVED', 'PENDING'].includes(result.decision),
+      structuredContent: { ...result },
+      content: [{ type: 'text' as const, text: [
+        `${result.decision} — ${result.reason}`, `  request: ${result.requestId}`,
+        `  accounting: authorised permission is not proof of payment`,
+        `  agent: ${result.intent.agentId}`, `  amount: ${formatMinor(result.intent.amount, result.intent.currency)}`,
+        `  vendor: ${result.intent.vendor}`, `  rail: ${result.intent.rail}`, `  rule: ${result.rule}`,
+        result.decision === 'PENDING' ? `  expires: ${result.expiresAt}; resume with spend_status(requestId)` : `  decided: ${result.decidedBy}`,
+        result.ledgerSeq == null ? `  approval: ${result.approvalId}` : `  ledger: #${result.ledgerSeq}${result.approvalId ? ` (approval ${result.approvalId})` : ''}`,
+      ].join('\n') }] };
+  }
+  function failure(err: unknown) {
+    const status = err instanceof EngineError || err instanceof AuthError || err instanceof BudgetError ? err.status : 500;
+    const message = status === 500 ? 'Internal request error' : (err as Error).message;
+    return { isError: true, content: [{ type: 'text' as const, text: `SpendGate error (${status}): ${message}` }] };
   }
   const server = new McpServer(
     { name: 'spendgate', version: '0.1.0' },
@@ -24,7 +41,7 @@ export function buildMcpServer(principal: AgentPrincipal): McpServer {
     'spend',
     `Route a payment intent through SpendGate policy. Returns the decision: ALLOWED, DENIED, APPROVED or REJECTED.
 - Blocked vendors and hard-stop budget overruns are denied instantly.
-- Ambiguous cases (over approval threshold, new vendor, approval-override budget overrun, off-hours) escalate to a human and block until decided.
+- Ambiguous cases escalate to a human. Blocking remains the default; deferred=true returns PENDING and a durable requestId immediately.
 - Permission reserves funds; only verified settlement records completed spend.`,
     {
       agent: z.string().min(1).max(64).optional().describe('Agent id registered in SpendGate, e.g. "procurement-02"'),
@@ -33,39 +50,36 @@ export function buildMcpServer(principal: AgentPrincipal): McpServer {
       vendor: z.string().min(1).max(120).describe('Who gets paid'),
       purpose: z.string().min(1).max(280).describe('What this payment is for'),
       rail: z.enum(['x402', 'mpp', 'ap2', 'acp', 'card', 'stablecoin', 'mcp']).default('mcp').describe('Payment rail'),
+      deferred: z.boolean().default(false).describe('Return a durable PENDING request immediately; retrieve its outcome with spend_status.'),
       idempotencyKey: z.string().min(1).max(128).optional().describe(
         'Client-generated unique key for this payment intent. Safe to retry: a duplicate key returns the original decision without spending again.',
       ),
     },
-    async (args) => {
+    async (args, extra) => {
       try {
-        const result = await submitSpend({ ...args, agentId: scopedAgent(args.agent) });
-        const ok = result.decision === 'ALLOWED' || result.decision === 'APPROVED';
-        return {
-          isError: !ok,
-          content: [{
-            type: 'text',
-            text: [
-              `${result.decision} — ${result.reason}`,
-              `  request: ${result.requestId}`,
-            `  accounting: authorised permission is not proof of payment`,
-            `  agent:   ${result.intent.agentId}`,
-              `  amount:  ${formatMinor(result.intent.amount, result.intent.currency)}`,
-              `  vendor:  ${result.intent.vendor}`,
-              `  rail:    ${result.intent.rail}`,
-              `  rule:    ${result.rule}`,
-              `  decided: ${result.decidedBy}`,
-              `  ledger:  #${result.ledgerSeq}${result.approvalId ? ` (approval ${result.approvalId})` : ''}`,
-            ].join('\n'),
-          }],
-        };
-      } catch (err) {
-        const msg = (err instanceof EngineError || err instanceof BudgetError) ? err.message : String(err);
-        const status = err instanceof EngineError || err instanceof AuthError || err instanceof BudgetError ? err.status : 500;
-        return { isError: true, content: [{ type: 'text', text: `SpendGate error (${status}): ${msg}` }] };
-      }
+        const agentId = scopedAgent(args.agent);
+        const initial = submitRequest({ ...args, agentId });
+        const signal = connectionSignal ? AbortSignal.any([connectionSignal, extra.signal]) : extra.signal;
+        const result = !args.deferred && initial.decision === 'PENDING'
+          ? await waitForRequest(agentId, initial.requestId, { signal, maxWaitMs: 604800100 }) : initial;
+        scopedAgent(args.agent);
+        return response(result);
+      } catch (err) { return failure(err); }
     },
   );
+
+  server.tool('spend_status', 'Read or resume your own durable request. PENDING is not authorisation to execute.', {
+    requestId: z.string().uuid(),
+    waitMs: z.number().int().min(0).max(30000).default(0).describe('Optionally wait up to 30 seconds for a final outcome.'),
+  }, async ({ requestId, waitMs }, extra) => {
+    try {
+      const agentId = scopedAgent();
+      const signal = connectionSignal ? AbortSignal.any([connectionSignal, extra.signal]) : extra.signal;
+      const result = waitMs ? await waitForRequest(agentId, requestId, { signal, maxWaitMs: waitMs }) : getRequest(agentId, requestId);
+      scopedAgent();
+      return response(result);
+    } catch (err) { return failure(err); }
+  });
 
   server.tool(
     'budget_status',

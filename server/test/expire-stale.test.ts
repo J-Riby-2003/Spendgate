@@ -4,7 +4,6 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 const env = vi.hoisted(() => {
   process.env.SPENDGATE_DATA = `/tmp/spendgate-test-expire-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  process.env.SPENDGATE_APPROVAL_TIMEOUT_MS = '80';
   return process.env.SPENDGATE_DATA;
 });
 
@@ -32,7 +31,7 @@ beforeAll(() => {
 });
 
 describe('expireStale — no live waiter (post-restart)', () => {
-  it('marks the approval rejected and appends an EXPIRED ledger row', async () => {
+  it('marks the approval expired and appends an EXPIRED ledger row', async () => {
     const approval: ApprovalRequest = {
       id: 'expire-restart-1',
       intent: {
@@ -47,18 +46,17 @@ describe('expireStale — no live waiter (post-restart)', () => {
       rule: 'over-approval-threshold',
       reason: 'test',
       status: 'pending',
-      createdAt: new Date().toISOString(),
+      createdAt: new Date(Date.now() - 300001).toISOString(),
       decidedAt: null,
       decidedBy: null,
       note: null,
     };
     store.createApproval(approval);
 
-    await new Promise((r) => setTimeout(r, 120)); // outlast the 80ms timeout
     expireStale();
 
     const settled = store.getApproval(approval.id);
-    expect(settled?.status).toBe('rejected');
+    expect(settled?.status).toBe('expired');
     expect(settled?.decidedBy).toBe('expiry');
 
     const entry = store.recentLedger(1)[0];

@@ -101,6 +101,83 @@ CREATE TABLE login_attempts (key TEXT PRIMARY KEY, failures INTEGER NOT NULL, re
     INSERT INTO legacy_budget_obligations (ledger_seq, agent_id)
       SELECT seq, agent_id FROM ledger WHERE decision IN ('ALLOWED','APPROVED');
   `); } },
+  { id: 'issue07_001_durable_requests', up(db) {
+    db.exec(`
+      ALTER TABLE approvals ADD COLUMN expires_at TEXT;
+      ALTER TABLE ledger ADD COLUMN event_version INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE ledger ADD COLUMN details_json TEXT;
+      ALTER TABLE idempotency_keys ADD COLUMN request_id TEXT;
+      ALTER TABLE idempotency_keys ADD COLUMN fingerprint TEXT;
+      CREATE TABLE spend_requests (
+        request_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, intent_json TEXT NOT NULL,
+        approval_id TEXT UNIQUE, ledger_seq INTEGER, reason TEXT NOT NULL,
+        evidence_json TEXT, reconciliation_required INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX idx_requests_agent ON spend_requests(agent_id);
+      CREATE TABLE notification_outbox (
+        approval_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at INTEGER NOT NULL DEFAULT 0,
+        lease_id TEXT, lease_until INTEGER, last_error TEXT, delivered_at TEXT
+      );
+      CREATE INDEX idx_outbox_due ON notification_outbox(status, next_attempt_at);
+      CREATE TABLE approval_recovery_audit (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, approval_id TEXT,
+        event TEXT NOT NULL, details TEXT NOT NULL,
+        recorded_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+      );
+    `);
+    // No old ledger row, timestamp, actor or payment claim is rewritten.
+    for (const row of db.prepare('SELECT * FROM ledger ORDER BY seq').all()) {
+      const intent = { id: row.intent_id, agentId: row.agent_id, amount: row.amount, currency: row.currency,
+        vendor: row.vendor, purpose: row.purpose, rail: row.rail };
+      const exists = db.prepare('SELECT request_id FROM spend_requests WHERE request_id=?').get(row.intent_id);
+      if (exists) {
+        db.prepare('UPDATE spend_requests SET reconciliation_required=1 WHERE request_id=?').run(row.intent_id);
+        continue;
+      }
+      const duplicateApproval = row.approval_id && db.prepare('SELECT request_id FROM spend_requests WHERE approval_id=?').get(row.approval_id);
+      if (duplicateApproval) db.prepare('UPDATE spend_requests SET reconciliation_required=1 WHERE approval_id=?').run(row.approval_id);
+      db.prepare('INSERT INTO spend_requests (request_id,agent_id,intent_json,approval_id,ledger_seq,reason,reconciliation_required) VALUES (?,?,?,?,?,?,?)')
+        .run(row.intent_id, row.agent_id, JSON.stringify(intent), duplicateApproval ? null : row.approval_id, row.seq, row.rule, duplicateApproval ? 1 : 0);
+    }
+    for (const row of db.prepare('SELECT * FROM approvals').all()) {
+      const intent = JSON.parse(String(row.intent_json));
+      const link = db.prepare('SELECT MIN(expires_at) AS deadline FROM approval_links WHERE approval_id=?').get(row.id);
+      // This is an explicit upgrade deadline policy, not a claim about the old configured timeout.
+      const created = Date.parse(String(row.created_at));
+      const defaultDeadline = Number.isFinite(created) ? new Date(created + 300000).toISOString() : null;
+      const deadline = defaultDeadline && link?.deadline && String(link.deadline) < defaultDeadline ? String(link.deadline) : defaultDeadline;
+      db.prepare('UPDATE approvals SET expires_at=? WHERE id=?').run(deadline, row.id);
+      db.prepare('INSERT INTO approval_recovery_audit (approval_id,event,details) VALUES (?,?,?)')
+        .run(row.id, 'upgrade-deadline-policy', JSON.stringify({ expiresAt: deadline, source: link?.deadline ? 'minimum-existing-link-and-five-minutes' : 'five-minutes-from-recorded-creation' }));
+      const linked = db.prepare('SELECT * FROM ledger WHERE approval_id=?').all(row.id);
+      const expectedStatus = linked.length === 1 ? ({ APPROVED: 'approved', REJECTED: 'rejected', EXPIRED: 'expired' } as Record<string,string>)[String(linked[0].decision)] : null;
+      const legacyExpiry = row.status === 'rejected' && row.decided_by === 'expiry' && expectedStatus === 'expired';
+      const terminalConflict = row.status !== 'pending' && expectedStatus && row.status !== expectedStatus && !legacyExpiry;
+      const ambiguous = terminalConflict || !deadline || linked.length > 1 || (linked.length === 0 && row.status !== 'pending') ||
+        (linked.length === 1 && (linked[0].intent_id !== intent.id || !['APPROVED','REJECTED','EXPIRED'].includes(String(linked[0].decision))));
+      if (!ambiguous && linked.length === 1) {
+        const statuses: Record<string,string> = { APPROVED: 'approved', REJECTED: 'rejected', EXPIRED: 'expired' };
+        const status = statuses[String(linked[0].decision)];
+        if (status) db.prepare('UPDATE approvals SET status=? WHERE id=?').run(status, row.id);
+      }
+      db.prepare('INSERT OR IGNORE INTO spend_requests (request_id,agent_id,intent_json,approval_id,ledger_seq,reason,reconciliation_required) VALUES (?,?,?,?,?,?,?)')
+        .run(intent.id, intent.agentId, row.intent_json, row.id, linked.length === 1 ? linked[0].seq : null, row.reason, ambiguous ? 1 : 0);
+      if (ambiguous) {
+        db.prepare('UPDATE spend_requests SET reconciliation_required=1 WHERE request_id=?').run(intent.id);
+        db.prepare('INSERT INTO approval_recovery_audit (approval_id,event,details) VALUES (?,?,?)')
+          .run(row.id, 'reconciliation-required', 'Legacy terminal outcome is missing or contradictory; no outcome was invented.');
+      } else if (row.status === 'pending' && linked.length === 0) {
+        db.prepare('INSERT INTO notification_outbox (approval_id) VALUES (?)').run(row.id);
+      }
+    }
+    db.exec(`UPDATE idempotency_keys SET request_id=(SELECT intent_id FROM ledger WHERE seq=idempotency_keys.ledger_seq) WHERE ledger_seq IS NOT NULL`);
+    for (const row of db.prepare('SELECT agent_id,key,created_at FROM idempotency_keys WHERE request_id IS NULL').all()) {
+      db.prepare('INSERT INTO approval_recovery_audit (approval_id,event,details) VALUES (NULL,?,?)')
+        .run('orphaned-idempotency-claim', JSON.stringify({ agentId: row.agent_id, key: row.key, createdAt: row.created_at }));
+    }
+  } },
+
 ];
 
 /** Append immutable, uniquely named migrations; never renumber deployed IDs. */

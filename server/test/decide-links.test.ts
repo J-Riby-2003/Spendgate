@@ -100,7 +100,7 @@ describe('decideByToken', () => {
     expect(() => decideByToken(link.token)).toThrowError(/already been used/);
   });
 
-  it('the sibling link dies once the approval is decided (409)', async () => {
+  it('the sibling link is invalidated atomically with the decision', async () => {
     const p = escalate('sibling-link');
     await new Promise((r) => setTimeout(r, 50));
     const approval = store.pendingApprovals().at(-1)!;
@@ -108,7 +108,7 @@ describe('decideByToken', () => {
 
     decideByToken(approve.token);
     await p;
-    expect(() => decideByToken(reject.token)).toThrowError(/already been decided/);
+    expect(() => decideByToken(reject.token)).toThrowError(/already been used/);
   });
 
   it('unknown token → 404, expired link → 410', async () => {

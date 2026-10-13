@@ -67,8 +67,8 @@ it('does not release ambiguous in-flight holds just because their expiry timesta
 it('migrates existing policies explicitly and gates only unknown legacy obligations without rewriting history', () => {
   const legacy = new DatabaseSync(':memory:'); migrate(legacy, migrations.slice(0, 2));
   legacy.exec(`INSERT INTO agents VALUES ('old','Old','GBP'); INSERT INTO policies VALUES ('old','{"agentId":"old","dailyBudget":10000}');
-    INSERT INTO ledger VALUES (1,'2026-10-13T10:00:00Z','legacy-i','old',5000,'GBP','vendor','purpose','mcp','ALLOWED','rule','policy',NULL,'GENESIS','hash','signature')`);
-  const history = JSON.stringify(legacy.prepare('SELECT * FROM ledger').all());
+    INSERT INTO ledger (seq,ts,intent_id,agent_id,amount,currency,vendor,purpose,rail,decision,rule,decided_by,approval_id,prev_hash,hash,signature) VALUES (1,'2026-10-13T10:00:00Z','legacy-i','old',5000,'GBP','vendor','purpose','mcp','ALLOWED','rule','policy',NULL,'GENESIS','hash','signature')`);
+  const history = JSON.stringify(legacy.prepare('SELECT seq,ts,intent_id,agent_id,amount,currency,vendor,purpose,rail,decision,rule,decided_by,approval_id,prev_hash,hash,signature FROM ledger').all());
   migrate(legacy); migrate(legacy);
   const b = createBudgetStore(legacy);
   expect(b.getBudgetSnapshot('old', day1)).toMatchObject({ mode: 'approval-override', spentMinor: 0, reconciliationRequired: true });
@@ -76,11 +76,11 @@ it('migrates existing policies explicitly and gates only unknown legacy obligati
   withImmediateTransaction(legacy, () => b.reconcileLegacy({ ledgerSeq: 1, action: 'no-outstanding-obligation', operatorId: 'op', reason: 'Reviewed records', eventId: 'review-1' }, day1));
   expect(b.getBudgetSnapshot('old', day1)).toMatchObject({ spentMinor: 0, reconciliationRequired: false });
   expect(b.legacyObligations('old')[0]).toMatchObject({ disposition: 'no-outstanding-obligation', executionStatus: 'unknown' });
-  expect(JSON.stringify(legacy.prepare('SELECT * FROM ledger').all())).toBe(history);
+  expect(JSON.stringify(legacy.prepare('SELECT seq,ts,intent_id,agent_id,amount,currency,vendor,purpose,rail,decision,rule,decided_by,approval_id,prev_hash,hash,signature FROM ledger').all())).toBe(history);
   legacy.close();
 });
 it('requires evidence for confirmed legacy payment and makes reconciliation idempotent', () => {
-  db.exec(`INSERT INTO ledger VALUES (1,'2026-10-13T10:00:00Z','legacy-i','a',5000,'GBP','vendor','purpose','mcp','APPROVED','rule','human:op',NULL,'GENESIS','hash','signature');
+  db.exec(`INSERT INTO ledger (seq,ts,intent_id,agent_id,amount,currency,vendor,purpose,rail,decision,rule,decided_by,approval_id,prev_hash,hash,signature) VALUES (1,'2026-10-13T10:00:00Z','legacy-i','a',5000,'GBP','vendor','purpose','mcp','APPROVED','rule','human:op',NULL,'GENESIS','hash','signature');
     INSERT INTO legacy_budget_obligations (ledger_seq, agent_id) VALUES (1, 'a')`);
   const review = { ledgerSeq: 1, action: 'confirmed-paid' as const, operatorId: 'op', reason: 'Provider confirmation', eventId: 'review-1' };
   expect(() => tx(() => budget.reconcileLegacy(review, day1))).toThrow(/evidence/i);
@@ -95,7 +95,7 @@ it('replays an existing reservation after its expiry and never acquires a second
   expect(budget.getBudgetSnapshot('a', day2).reservedMinor).toBe(3000);
 });
 it('lets an operator resolve a previously identified outstanding legacy obligation with evidence', () => {
-  db.exec(`INSERT INTO ledger VALUES (1,'2026-10-13T10:00:00Z','legacy-i','a',5000,'GBP','vendor','purpose','mcp','APPROVED','rule','human:op',NULL,'GENESIS','hash','signature');
+  db.exec(`INSERT INTO ledger (seq,ts,intent_id,agent_id,amount,currency,vendor,purpose,rail,decision,rule,decided_by,approval_id,prev_hash,hash,signature) VALUES (1,'2026-10-13T10:00:00Z','legacy-i','a',5000,'GBP','vendor','purpose','mcp','APPROVED','rule','human:op',NULL,'GENESIS','hash','signature');
     INSERT INTO legacy_budget_obligations (ledger_seq, agent_id) VALUES (1, 'a')`);
   tx(() => budget.reconcileLegacy({ ledgerSeq: 1, action: 'outstanding', operatorId: 'op', reason: 'Payment still uncertain', eventId: 'review-1' }, day1));
   expect(budget.getBudgetSnapshot('a', day2)).toMatchObject({ reservedMinor: 5000, reconciliationRequired: false });

@@ -1,266 +1,220 @@
-// Engine: the single front door for spend intents.
-// evaluate → allow (ledger) | deny (ledger) | escalate (approval queue → wait for a human → ledger).
-import { randomUUID } from 'node:crypto';
-import type { ApprovalRequest, LedgerDecision, Rail, SpendIntent } from './types.js';
-import { store, withImmediateTransaction } from './store.js';
+// Durable request lifecycle. Waiters observe committed outcomes; they never own them.
+import { createHash, randomUUID } from 'node:crypto';
+import type { ApprovalRequest, LedgerDecision, Rail, SpendIntent, DecisionDetails } from './types.js';
+import { store, db, withImmediateTransaction } from './store.js';
 import { budget } from './budget-state.js';
 import { BudgetError } from './budget.js';
 import { isSupportedCurrency } from '../../../shared/currency.js';
-import { evaluate, type EvalResult } from './policy.js';
+import { evaluate } from './policy.js';
 import { appendLedger } from './ledger.js';
-import { awaitDecisionAsync, resolveWaiter } from './waiters.js';
 import { cleanStr } from './sanitize.js';
 
-export const APPROVAL_TIMEOUT_MS = Number(process.env.SPENDGATE_APPROVAL_TIMEOUT_MS ?? 5 * 60 * 1000);
-
-// --- tiny event bus (WS broadcast hooks in from index.ts) ---
-type Event =
-  | { type: 'ledger'; entry: unknown }
-  | { type: 'approvals'; pending: unknown[] }
-  | { type: 'state' };
+export function approvalTimeout(env: NodeJS.ProcessEnv = process.env): number {
+  const value = Number(env.SPENDGATE_APPROVAL_TIMEOUT_MS ?? 300000);
+  if (!Number.isSafeInteger(value) || value < 60000 || value > 604800000) throw new Error('SPENDGATE_APPROVAL_TIMEOUT_MS must be an integer from 60000 to 604800000.');
+  return value;
+}
+export const APPROVAL_TIMEOUT_MS = approvalTimeout();
+// Execution permission has its own deadline. Never release an execution hold merely because it elapsed.
+export const AUTHORISATION_TTL_MS = 300000;
+type Event = { type: 'ledger'; entry: unknown } | { type: 'approvals'; pending: unknown[] } | { type: 'state' };
 const listeners = new Set<(e: Event) => void>();
-export function onEvent(fn: (e: Event) => void): () => void {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
-}
+export function onEvent(fn: (e: Event) => void): () => void { listeners.add(fn); return () => listeners.delete(fn); }
 export function emit(e: Event): void {
-  for (const fn of listeners) fn(e);
+  for (const fn of listeners) { try { fn(e); } catch (err) { console.error('[events] subscriber failed', err instanceof Error ? err.name : 'Error'); } }
 }
-
-export class EngineError extends Error {
-  constructor(
-    message: string,
-    public status = 400,
-  ) {
-    super(message);
-  }
-}
-
+export class EngineError extends Error { constructor(message: string, public status = 400) { super(message); } }
 export interface SpendResult {
-  intent: SpendIntent;
-  requestId: string;
-  decision: LedgerDecision;
-  rule: string;
-  reason: string;
-  decidedBy: string;
-  approvalId: string | null;
-  ledgerSeq: number;
+  intent: SpendIntent; requestId: string; decision: LedgerDecision; rule: string; reason: string;
+  decidedBy: string; approvalId: string | null; ledgerSeq: number; expiresAt: string | null; authorisationExpiresAt: string | null;
 }
-
-export async function submitSpend(input: {
-  agentId: string;
-  amount: number;
-  currency: string;
-  vendor: string;
-  purpose: string;
-  rail: Rail;
+export interface PendingSpendResult {
+  intent: SpendIntent; requestId: string; decision: 'PENDING'; rule: string; reason: string;
+  decidedBy: null; approvalId: string; ledgerSeq: null; expiresAt: string; authorisationExpiresAt: null;
+}
+export type RequestSnapshot = SpendResult | PendingSpendResult;
+export interface SpendInput {
+  agentId: string; amount: number; currency: string; vendor: string; purpose: string; rail: Rail;
   idempotencyKey?: string;
-}): Promise<SpendResult> {
-  const agent = store.listAgents().find((a) => a.agentId === input.agentId);
-  if (!agent) throw new EngineError(`Unknown agent "${input.agentId}". Register it in the console first.`, 404);
-
-  if (!Number.isInteger(input.amount) || input.amount <= 0) {
-    throw new EngineError('amount must be a positive integer in minor units (pence/cents).', 422);
-  }
-  if (input.amount > 1e12) {
-    throw new EngineError('amount exceeds the maximum of 10,000,000,000.00.', 422);
-  }
-  const vendor = cleanStr(input.vendor, 'vendor', 120);
-  const purpose = cleanStr(input.purpose, 'purpose', 280);
-  if (!vendor || !purpose) {
-    throw new EngineError('vendor and purpose are required.', 422);
-  }
-  const currency = typeof input.currency === 'string' ? input.currency.toUpperCase() : '';
-  if (!isSupportedCurrency(currency)) throw new EngineError('Unsupported currency.', 422);
-  if (currency !== agent.currency) throw new EngineError('Request currency must match the configured agent currency.', 422);
-
-  const policy = store.getPolicy(input.agentId);
-  if (!policy) throw new EngineError(`No policy for agent "${input.agentId}".`, 409);
-
-  const start = withImmediateTransaction<SpendResult | { approval: ApprovalRequest; verdict: EvalResult; idemKey: string | null }>(() => {
-    // Idempotency: claim the key before any processing. A retry with the same
-    // key replays the original outcome instead of spending again — agents that
-    // retry after timeouts/parsing errors can never double-spend.
-    let idemKey: string | null = null;
-    if (input.idempotencyKey != null) {
-      const key = cleanStr(input.idempotencyKey, 'idempotencyKey', 128);
-      if (!key) throw new EngineError('idempotencyKey must be a non-empty string.', 422);
-      const claim = store.claimIdempotencyKey(input.agentId, key);
-      if (!claim.fresh) {
-        const ex = claim.existing;
-        if (ex?.ledgerSeq != null) {
-          const entry = store.ledgerEntryBySeq(ex.ledgerSeq);
-          if (entry) {
-            return {
-              requestId: entry.intentId,
-              intent: {
-                id: entry.intentId,
-                agentId: entry.agentId,
-                amount: entry.amount,
-                currency: entry.currency,
-                vendor: entry.vendor,
-                purpose: entry.purpose,
-                rail: entry.rail,
-              },
-              decision: entry.decision,
-              rule: entry.rule,
-              reason: ex.reason ?? entry.rule,
-              decidedBy: entry.decidedBy,
-              approvalId: entry.approvalId,
-              ledgerSeq: entry.seq,
-            };
-          }
-        }
-        throw new EngineError(
-          `Duplicate idempotency key "${key}" — its escalation is still awaiting a human decision.`,
-          409,
-        );
-      }
-      idemKey = key;
-    }
-
-    const intent: SpendIntent = {
-      id: randomUUID(),
-      agentId: input.agentId,
-      amount: input.amount,
-      currency,
-      vendor,
-      purpose,
-      rail: input.rail,
-    };
-
-    const snapshot = budget.getBudgetSnapshot(input.agentId);
-    if (snapshot.reconciliationRequired) throw new BudgetError('Legacy obligations require operator reconciliation before authorisation.');
-    const verdict = evaluate(policy, intent, {
-      spentTodayMinor: snapshot.spentMinor,
-      reservedMinor: snapshot.reservedMinor,
-      knownVendors: store.knownVendors(input.agentId),
-      now: new Date(),
-    });
-
-    if (verdict.decision === 'ALLOW' || verdict.decision === 'DENY') {
-      const decision: LedgerDecision = verdict.decision === 'ALLOW' ? 'ALLOWED' : 'DENIED';
-      if (decision === 'ALLOWED') reserveIntent(intent);
-      const entry = appendLedger({ intent, decision, rule: verdict.rule, decidedBy: 'policy' });
-      if (idemKey) store.settleIdempotencyKey(input.agentId, idemKey, { ledgerSeq: entry.seq, approvalId: null, reason: verdict.reason });
-      return { requestId: intent.id, intent, decision, rule: verdict.rule, reason: verdict.reason, decidedBy: 'policy', approvalId: null, ledgerSeq: entry.seq };
-    }
-
-    // ESCALATE — park the intent in the approval queue and wait for a human.
-    const approval: ApprovalRequest = {
-      id: randomUUID(),
-      intent,
-      rule: verdict.rule,
-      reason: verdict.reason,
-      status: 'pending',
-      createdAt: new Date().toISOString(),
-      decidedAt: null,
-      decidedBy: null,
-      note: null,
-    };
-    store.createApproval(approval);
-    return { approval, verdict, idemKey };
-  });
-  if (!('approval' in start)) {
-    emit({ type: 'ledger', entry: store.ledgerEntryBySeq(start.ledgerSeq) });
-    emit({ type: 'state' });
-    return start;
-  }
-  const { approval, verdict, idemKey } = start;
-  const intent = approval.intent;
-  emit({ type: 'approvals', pending: store.pendingApprovals() });
-  emit({ type: 'state' });
-
-  const outcome = await awaitDecisionAsync(approval.id, APPROVAL_TIMEOUT_MS);
-
-  if (outcome === 'expired') {
-    // Mark the queue row so the dashboard agrees with the ledger.
-    store.decideApproval(approval.id, 'rejected', 'expiry', 'Escalation timed out');
-  }
-  const decided =
-    outcome === 'approved' ? `human:${store.getApproval(approval.id)?.decidedBy ?? 'unknown'}`
-    : outcome === 'rejected' ? `human:${store.getApproval(approval.id)?.decidedBy ?? 'unknown'}`
-    : 'expiry';
-
-  const decisionMap = { approved: 'APPROVED', rejected: 'REJECTED', expired: 'EXPIRED' } as const;
-  const entry = appendLedger({
-    intent,
-    decision: decisionMap[outcome],
-    rule: outcome === 'approved' && budget.accountingEvents(intent.agentId).some(e => e.requestId === intent.id && e.kind === 'reserved' && e.override) ? `budget-override:${verdict.rule}` : verdict.rule,
-    decidedBy: decided,
-    approvalId: approval.id,
-  });
-  if (idemKey) {
-    store.settleIdempotencyKey(input.agentId, idemKey, {
-      ledgerSeq: entry.seq,
-      approvalId: approval.id,
-      reason: outcome === 'expired' ? 'No human decided in time — escalations expire denied.' : verdict.reason,
-    });
-  }
-  emit({ type: 'ledger', entry });
-  emit({ type: 'approvals', pending: store.pendingApprovals() });
-  emit({ type: 'state' });
-
-  return {
-    requestId: intent.id, intent,
-    decision: decisionMap[outcome],
-    rule: entry.rule,
-    reason: outcome === 'expired' ? 'No human decided in time — escalations expire denied.' : verdict.reason,
-    decidedBy: decided,
-    approvalId: approval.id,
-    ledgerSeq: entry.seq,
-  };
 }
-
-/** Human decision from the console. Returns false if already decided. */
-// Permission expires before execution; #2 must explicitly reconcile execution before releasing a hold.
-export const AUTHORISATION_TTL_MS = 5 * 60 * 1000;
-function reserveIntent(intent: SpendIntent, override?: { operatorId: string; reason: string }): void {
-  const now = new Date();
+export type EvidenceReference = { schemaVersion: number; digest: string };
+function validateEvidence(evidence?: EvidenceReference): EvidenceReference | null {
+  if (!evidence) return null;
+  if (!Number.isSafeInteger(evidence.schemaVersion) || evidence.schemaVersion < 1 || !/^[a-f0-9]{64}$/.test(evidence.digest)) throw new EngineError('Invalid evidence reference.', 422);
+  return { schemaVersion: evidence.schemaVersion, digest: evidence.digest };
+}
+function details(actor: DecisionDetails['actor'], note: string | null, evidence: EvidenceReference | null, budgetRecheck: DecisionDetails['budgetRecheck'] = null): DecisionDetails {
+  return { actor, note, evidence, budgetRecheck };
+}
+function readRequest(requestId: string): RequestSnapshot {
+  const row = db.prepare('SELECT * FROM spend_requests WHERE request_id=?').get(requestId);
+  if (!row) throw new EngineError('Unknown request.', 404);
+  if (row.reconciliation_required) throw new EngineError('Legacy request requires audited reconciliation.', 409);
+  const intent: SpendIntent = JSON.parse(String(row.intent_json));
+  const approval = row.approval_id ? store.getApproval(String(row.approval_id)) : null;
+  if (row.ledger_seq != null) {
+    const entry = store.ledgerEntryBySeq(Number(row.ledger_seq));
+    if (!entry) throw new EngineError('Request outcome requires reconciliation.', 409);
+    return { requestId, intent, decision: entry.decision, rule: entry.rule, reason: String(row.reason),
+      decidedBy: entry.decidedBy, approvalId: entry.approvalId, ledgerSeq: entry.seq, expiresAt: approval?.expiresAt ?? null, authorisationExpiresAt: budget.getReservation(requestId)?.expiresAt ?? null };
+  }
+  if (!approval || approval.status !== 'pending') throw new EngineError('Request outcome requires reconciliation.', 409);
+  return { requestId, intent, decision: 'PENDING', rule: approval.rule, reason: approval.reason, decidedBy: null,
+    approvalId: approval.id, ledgerSeq: null, expiresAt: approval.expiresAt!, authorisationExpiresAt: null };
+}
+/** Agent ID must originate from #1's validated principal, never caller metadata. */
+export function getRequest(agentId: string, requestId: string): RequestSnapshot {
+  const row = db.prepare('SELECT agent_id, approval_id FROM spend_requests WHERE request_id=?').get(requestId);
+  if (!row || row.agent_id !== agentId) throw new EngineError('Unknown request.', 404);
+  if (row.approval_id) finaliseApproval(String(row.approval_id), 'expire', { kind: 'expiry', id: null });
+  return readRequest(requestId);
+}
+function reserveIntent(intent: SpendIntent, now: Date, override?: { operatorId: string; reason: string }): void {
   budget.reserveBudget({ requestId: intent.id, agentId: intent.agentId, amountMinor: intent.amount,
     currency: intent.currency, expiresAt: new Date(now.getTime() + AUTHORISATION_TTL_MS).toISOString(), override }, now);
 }
-
-export function decide(approvalId: string, approve: boolean, by: string, note?: string): boolean {
-  const status = approve ? 'approved' : 'rejected';
-  const ok = withImmediateTransaction(() => {
-    const a = store.getApproval(approvalId);
-    if (!a || a.status !== 'pending' || Date.parse(a.createdAt) + APPROVAL_TIMEOUT_MS <= Date.now()) return false;
-    if (approve) {
-      const snapshot = budget.getBudgetSnapshot(a.intent.agentId);
-      const over = snapshot.remainingMinor != null && a.intent.amount > snapshot.remainingMinor;
-      if (over && by === 'decision-link') throw new BudgetError('Budget overrides require an authenticated console operator.');
-      if (over && snapshot.mode === 'approval-override' && !note?.trim()) throw new BudgetError('An explicit override reason is required.', 422);
-      reserveIntent(a.intent, over ? { operatorId: by, reason: note ?? '' } : undefined);
+/** Synchronous durable submission. Evidence is a trusted #6 hook, absent from agent-facing schemas. */
+export function submitRequest(input: SpendInput, options: { evidence?: EvidenceReference } = {}): RequestSnapshot {
+  const agent = store.listAgents().find(a => a.agentId === input.agentId);
+  if (!agent) throw new EngineError(`Unknown agent "${input.agentId}". Register it in the console first.`, 404);
+  if (!Number.isInteger(input.amount) || input.amount <= 0) throw new EngineError('amount must be a positive integer in minor units (pence/cents).', 422);
+  if (input.amount > 1e12) throw new EngineError('amount exceeds the maximum of 10,000,000,000.00.', 422);
+  const vendor = cleanStr(input.vendor, 'vendor', 120)!;
+  const purpose = cleanStr(input.purpose, 'purpose', 280)!;
+  const currency = typeof input.currency === 'string' ? input.currency.toUpperCase() : '';
+  if (!isSupportedCurrency(currency)) throw new EngineError('Unsupported currency.', 422);
+  const key = input.idempotencyKey == null ? null : cleanStr(input.idempotencyKey, 'idempotencyKey', 128)!;
+  const evidence = validateEvidence(options.evidence);
+  const fingerprint = createHash('sha256').update(JSON.stringify([input.agentId, input.amount, currency, vendor, purpose, input.rail])).digest('hex');
+  const result = withImmediateTransaction(() => {
+    if (key) {
+      const existing = db.prepare('SELECT * FROM idempotency_keys WHERE agent_id=? AND key=?').get(input.agentId, key);
+      if (existing) {
+        // Legacy settled keys can replay, but unlinked claims cannot safely be matched by timestamps.
+        if (existing.fingerprint && existing.fingerprint !== fingerprint) throw new EngineError('Idempotency key reused with different request content.', 409);
+        if (!existing.request_id) throw new EngineError('Legacy idempotency claim requires audited reconciliation.', 409);
+        if (!existing.fingerprint) {
+          const old = readRequest(String(existing.request_id)).intent;
+          const oldHash = createHash('sha256').update(JSON.stringify([old.agentId, old.amount, old.currency, old.vendor, old.purpose, old.rail])).digest('hex');
+          if (oldHash !== fingerprint) throw new EngineError('Idempotency key reused with different request content.', 409);
+        }
+        return { requestId: String(existing.request_id), fresh: false };
+      }
     }
-    return store.decideApproval(approvalId, status, by, note ?? null);
+    if (db.prepare('SELECT request_id FROM spend_requests WHERE agent_id=? AND reconciliation_required=1 LIMIT 1').get(input.agentId)) throw new EngineError('Legacy requests require audited reconciliation before new authorisation.', 409);
+    // Replay precedes mutable policy/currency checks so a retry can still recover its original result.
+    if (currency !== agent.currency) throw new EngineError('Request currency must match the configured agent currency.', 422);
+    const policy = store.getPolicy(input.agentId);
+    if (!policy) throw new EngineError(`No policy for agent "${input.agentId}".`, 409);
+    const now = new Date();
+    const intent: SpendIntent = { id: randomUUID(), agentId: input.agentId, amount: input.amount, currency, vendor, purpose, rail: input.rail };
+    const snapshot = budget.getBudgetSnapshot(input.agentId, now);
+    if (snapshot.reconciliationRequired) throw new BudgetError('Legacy obligations require operator reconciliation before authorisation.');
+    const verdict = evaluate(policy, intent, { spentTodayMinor: snapshot.spentMinor, reservedMinor: snapshot.reservedMinor, knownVendors: store.knownVendors(input.agentId), now });
+    db.prepare('INSERT INTO spend_requests (request_id,agent_id,intent_json,reason,evidence_json) VALUES (?,?,?,?,?)')
+      .run(intent.id, intent.agentId, JSON.stringify(intent), verdict.reason, evidence ? JSON.stringify(evidence) : null);
+    if (key) db.prepare('INSERT INTO idempotency_keys (agent_id,key,created_at,request_id,fingerprint,reason) VALUES (?,?,?,?,?,?)')
+      .run(intent.agentId, key, now.toISOString(), intent.id, fingerprint, verdict.reason);
+    if (verdict.decision !== 'ESCALATE') {
+      const decision = verdict.decision === 'ALLOW' ? 'ALLOWED' : 'DENIED';
+      if (decision === 'ALLOWED') reserveIntent(intent, now);
+      const entry = appendLedger({ intent, decision, rule: verdict.rule, decidedBy: 'policy', now, details: details({ kind: 'policy', id: null }, null, evidence) });
+      db.prepare('UPDATE spend_requests SET ledger_seq=? WHERE request_id=?').run(entry.seq, intent.id);
+      db.prepare('UPDATE idempotency_keys SET ledger_seq=? WHERE request_id=?').run(entry.seq, intent.id);
+    } else {
+      const approval: ApprovalRequest = { id: randomUUID(), intent, rule: verdict.rule, reason: verdict.reason,
+        status: 'pending', createdAt: now.toISOString(), expiresAt: new Date(now.getTime() + APPROVAL_TIMEOUT_MS).toISOString(), decidedAt: null, decidedBy: null, note: null };
+      store.createApproval(approval);
+      db.prepare('UPDATE spend_requests SET approval_id=? WHERE request_id=?').run(approval.id, intent.id);
+      db.prepare('UPDATE idempotency_keys SET approval_id=? WHERE request_id=?').run(approval.id, intent.id);
+    }
+    return { requestId: intent.id, fresh: true };
   });
-  if (!ok) return false;
-  resolveWaiter(approvalId, status);
-  emit({ type: 'approvals', pending: store.pendingApprovals() });
-  emit({ type: 'state' });
-  return true;
+  const snapshot = getRequest(input.agentId, result.requestId);
+  if (result.fresh) broadcast(snapshot);
+  return snapshot;
 }
-
-/** Expire stale escalations — called on an interval from index.ts. */
-export function expireStale(): void {
-  const cutoff = new Date(Date.now() - APPROVAL_TIMEOUT_MS).toISOString();
-  for (const a of store.stalePending(cutoff)) {
-    store.decideApproval(a.id, 'rejected', 'expiry', 'Escalation timed out');
-    // With a live waiter the blocked submitSpend continues and appends the
-    // EXPIRED row itself. After a process restart no waiter exists — append
-    // here so every intent still lands in the ledger regardless of outcome.
-    if (!resolveWaiter(a.id, 'expired')) {
-      appendLedger({
-        intent: a.intent,
-        decision: 'EXPIRED',
-        rule: a.rule,
-        decidedBy: 'expiry',
-        approvalId: a.id,
-      });
-      emit({ type: 'ledger', entry: store.recentLedger(1)[0] });
+function broadcast(result: RequestSnapshot): void {
+  if (result.ledgerSeq != null) emit({ type: 'ledger', entry: store.ledgerEntryBySeq(result.ledgerSeq) });
+  emit({ type: 'approvals', pending: store.pendingApprovals() }); emit({ type: 'state' });
+}
+export interface FinalisationResult { changed: boolean; requestId: string | null; status: ApprovalRequest['status'] | null }
+export type DecisionActor = DecisionDetails['actor'];
+/** All writes, including capability consumption, share one BEGIN IMMEDIATE boundary. */
+export function finaliseApproval(approvalId: string, action: 'approve' | 'reject' | 'expire', actor: DecisionActor, note?: string, tokenHash?: string): FinalisationResult {
+  const result = withImmediateTransaction<FinalisationResult>(() => {
+    const approval = store.getApproval(approvalId);
+    if (!approval) return { changed: false, requestId: null, status: null };
+    const request = db.prepare('SELECT * FROM spend_requests WHERE request_id=?').get(approval.intent.id);
+    if (!request || request.reconciliation_required) throw new EngineError('Legacy request requires audited reconciliation.', 409);
+    if (approval.status !== 'pending') return { changed: false, requestId: approval.intent.id, status: approval.status };
+    const now = new Date();
+    const overdue = now.toISOString() >= approval.expiresAt!;
+    if (action === 'expire' && !overdue) return { changed: false, requestId: approval.intent.id, status: approval.status };
+    if (tokenHash) {
+      const link = store.getApprovalLink(tokenHash);
+      if (!link || link.approvalId !== approval.id || link.action !== action || link.usedAt) throw new EngineError('This decision link has already been used.', 410);
+      if (link.expiresAt <= now.toISOString() && !overdue) throw new EngineError('This decision link has expired.', 410);
     }
+    const status = overdue ? 'expired' : action === 'approve' ? 'approved' : 'rejected';
+    const finalActor: DecisionActor = overdue ? { kind: 'expiry', id: null } : actor;
+    const finalNote = overdue ? 'Escalation timed out' : cleanStr(note, 'note', 500, true) ?? null;
+    let recheck: DecisionDetails['budgetRecheck'] = null;
+    if (status === 'approved') {
+      if (db.prepare('SELECT request_id FROM spend_requests WHERE agent_id=? AND reconciliation_required=1 LIMIT 1').get(approval.intent.agentId)) throw new EngineError('Legacy requests require audited reconciliation before new authorisation.', 409);
+      const snapshot = budget.getBudgetSnapshot(approval.intent.agentId, now);
+      const over = snapshot.remainingMinor != null && approval.intent.amount > snapshot.remainingMinor;
+      if (over && finalActor.kind !== 'operator') throw new BudgetError('Budget overrides require an authenticated console operator.');
+      if (over && snapshot.mode === 'approval-override' && !finalNote?.trim()) throw new BudgetError('An explicit override reason is required.', 422);
+      reserveIntent(approval.intent, now, over ? { operatorId: finalActor.id!, reason: finalNote ?? '' } : undefined);
+      recheck = { reservedMinor: snapshot.reservedMinor, remainingMinor: snapshot.remainingMinor, overrideReason: over ? finalNote : null };
+    } else {
+      // Pending requests normally have no hold. Never release an already-final execution reservation.
+      const reservation = budget.getReservation(approval.intent.id);
+      if (reservation?.status === 'reserved') budget.releaseReservation(approval.intent.id, `approval:${approval.id}:${status}`, status === 'expired' ? 'expired' : 'cancelled', now);
+    }
+    const by = finalActor.kind === 'operator' ? finalActor.id! : finalActor.kind === 'decision-link' ? 'decision-link' : 'expiry';
+    store.decideApproval(approval.id, status, by, finalNote, now);
+    const decisions = { approved: 'APPROVED', rejected: 'REJECTED', expired: 'EXPIRED' } as const;
+    const reason = status === 'expired' ? 'No human decided in time — escalations expire denied.' : approval.reason;
+    const entry = appendLedger({ intent: approval.intent, decision: decisions[status],
+      rule: recheck?.overrideReason ? `budget-override:${approval.rule}` : approval.rule,
+      decidedBy: status === 'expired' ? 'expiry' : `human:${by}`, approvalId: approval.id, now,
+      details: details(finalActor, finalNote, request.evidence_json ? JSON.parse(String(request.evidence_json)) : null, recheck) });
+    db.prepare('UPDATE spend_requests SET ledger_seq=?,reason=? WHERE request_id=?').run(entry.seq, reason, approval.intent.id);
+    db.prepare('UPDATE idempotency_keys SET ledger_seq=?,approval_id=?,reason=? WHERE request_id=?').run(entry.seq, approval.id, reason, approval.intent.id);
+    db.prepare('UPDATE approval_links SET used_at=COALESCE(used_at,?) WHERE approval_id=?').run(now.toISOString(), approval.id);
+    db.prepare("UPDATE notification_outbox SET status='obsolete',lease_id=NULL,lease_until=NULL WHERE approval_id=? AND status!='delivered'").run(approval.id);
+    return { changed: true, requestId: approval.intent.id, status };
+  });
+  if (result.changed && result.requestId) broadcast(readRequest(result.requestId));
+  return result;
+}
+export function decide(approvalId: string, approve: boolean, by: string, note?: string): boolean {
+  const result = finaliseApproval(approvalId, approve ? 'approve' : 'reject', by === 'decision-link' ? { kind: 'decision-link', id: null } : { kind: 'operator', id: by }, note);
+  return result.changed && result.status === (approve ? 'approved' : 'rejected');
+}
+export function expireStale(): void {
+  for (const row of db.prepare("SELECT id FROM approvals WHERE status='pending' AND expires_at<=? AND NOT EXISTS (SELECT 1 FROM spend_requests r WHERE r.approval_id=approvals.id AND r.reconciliation_required=1)").all(new Date().toISOString())) {
+    finaliseApproval(String(row.id), 'expire', { kind: 'expiry', id: null });
   }
-  emit({ type: 'approvals', pending: store.pendingApprovals() });
-  emit({ type: 'state' });
+}
+/** Polling also observes commits from other processes; disconnect cleanup cannot affect durable state. */
+export async function waitForRequest(agentId: string, requestId: string, options: { signal?: AbortSignal; maxWaitMs?: number } = {}): Promise<RequestSnapshot> {
+  const until = Date.now() + (options.maxWaitMs ?? APPROVAL_TIMEOUT_MS);
+  while (true) {
+    const result = getRequest(agentId, requestId);
+    if (result.decision !== 'PENDING' || options.signal?.aborted || Date.now() >= until) return result;
+    await new Promise<void>(resolve => {
+      const finish = () => { clearTimeout(timer); options.signal?.removeEventListener('abort', finish); resolve(); };
+      const timer = setTimeout(finish, Math.min(100, Math.max(1, Date.parse(result.expiresAt) - Date.now()), Math.max(1, until - Date.now())));
+      options.signal?.addEventListener('abort', finish, { once: true });
+    });
+  }
+}
+export async function submitSpend(input: SpendInput): Promise<SpendResult> {
+  const initial = submitRequest(input);
+  const result = initial.decision === 'PENDING' ? await waitForRequest(input.agentId, initial.requestId, { maxWaitMs: 604800100 }) : initial;
+  if (result.decision === 'PENDING') throw new EngineError('Request remains pending; resume using its request ID.', 409);
+  return result;
 }

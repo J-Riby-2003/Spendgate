@@ -44,6 +44,9 @@ export interface LedgerEntry {
 
 export interface ApprovalRequest {
   id: string;
+  requestId: string;
+  expiresAt: string;
+  notification?: { configured: boolean; status?: 'pending' | 'sending' | 'retry' | 'failed' | 'delivered' | 'obsolete'; attempts?: number; lastError?: string | null; nextAttemptAt?: number; deliveredAt?: string | null };
   intent: {
     id: string;
     agentId: string;

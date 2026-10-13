@@ -2,6 +2,7 @@ import { createBudgetStore } from './budget.js';
 import { isSupportedCurrency } from '../../../shared/currency.js';
 import { BudgetError } from './budget.js';
 import { migrate } from './migrations.js';
+import { configureSqlite } from './sqlite-bootstrap.js';
 import { withImmediateTransaction as runImmediate } from './transactions.js';
 // SQLite persistence via node's built-in sqlite (no native deps).
 import { DatabaseSync } from 'node:sqlite';
@@ -15,7 +16,7 @@ mkdirSync(DATA_DIR, { recursive: true });
 
 export const db = new DatabaseSync(join(DATA_DIR, 'spendgate.db'));
 
-db.exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 10000');
+configureSqlite(db);
 migrate(db);
 
 // --- signing secret (generated once, lives outside the db) ---
@@ -26,6 +27,8 @@ export const SECRET = readFileSync(SECRET_FILE, 'utf8').trim();
 // --- row mapping ---
 export function rowToLedgerEntry(r: Record<string, unknown>): LedgerEntry {
   return {
+    eventVersion: (r.event_version ?? 1) as 1 | 2,
+    details: r.details_json ? JSON.parse(String(r.details_json)) : null,
     seq: r.seq as number,
     ts: r.ts as string,
     intentId: r.intent_id as string,
@@ -52,6 +55,7 @@ export function rowToApproval(r: Record<string, unknown>): ApprovalRequest {
     rule: r.rule as string,
     reason: r.reason as string,
     status: r.status as ApprovalRequest['status'],
+    expiresAt: r.expires_at as string,
     createdAt: r.created_at as string,
     decidedAt: (r.decided_at as string | null) ?? null,
     decidedBy: (r.decided_by as string | null) ?? null,
@@ -82,10 +86,10 @@ function rowToLink(r: Record<string, unknown>): ApprovalLink {
 const stmts = {
   lastEntry: db.prepare('SELECT * FROM ledger ORDER BY seq DESC LIMIT 1'),
   insertEntry: db.prepare(`INSERT INTO ledger
-    (seq, ts, intent_id, agent_id, amount, currency, vendor, purpose, rail, decision, rule, decided_by, approval_id, prev_hash, hash, signature)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-  insertApproval: db.prepare(`INSERT INTO approvals (id, intent_json, rule, reason, status, created_at)
-    VALUES (?, ?, ?, ?, 'pending', ?)`),
+    (seq, ts, intent_id, agent_id, amount, currency, vendor, purpose, rail, decision, rule, decided_by, approval_id, prev_hash, hash, signature, event_version, details_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+  insertApproval: db.prepare(`INSERT INTO approvals (id, intent_json, rule, reason, status, created_at, expires_at)
+    VALUES (?, ?, ?, ?, 'pending', ?, ?)`),
   getApproval: db.prepare('SELECT * FROM approvals WHERE id = ?'),
   decideApproval: db.prepare(`UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, note = ? WHERE id = ? AND status = 'pending'`),
   recentLedger: db.prepare('SELECT * FROM ledger ORDER BY seq DESC LIMIT ?'),
@@ -127,12 +131,15 @@ export const store = {
     // even after row deletes) would desync hash from row and break the chain.
     stmts.insertEntry.run(
       e.seq, e.ts, e.intentId, e.agentId, e.amount, e.currency, e.vendor, e.purpose, e.rail,
-      e.decision, e.rule, e.decidedBy, e.approvalId, e.prevHash, e.hash, e.signature,
+      e.decision, e.rule, e.decidedBy, e.approvalId, e.prevHash, e.hash, e.signature, e.eventVersion ?? 1, e.details ? JSON.stringify(e.details) : null,
     );
   },
 
   createApproval(a: ApprovalRequest): void {
-    stmts.insertApproval.run(a.id, JSON.stringify(a.intent), a.rule, a.reason, a.createdAt);
+    stmts.insertApproval.run(a.id, JSON.stringify(a.intent), a.rule, a.reason, a.createdAt, a.expiresAt ?? new Date(Date.parse(a.createdAt) + 300000).toISOString());
+    db.prepare('INSERT OR IGNORE INTO spend_requests (request_id,agent_id,intent_json,approval_id,reason) VALUES (?,?,?,?,?)')
+      .run(a.intent.id, a.intent.agentId, JSON.stringify(a.intent), a.id, a.reason);
+    db.prepare('INSERT OR IGNORE INTO notification_outbox (approval_id) VALUES (?)').run(a.id);
   },
 
   insertApprovalLink(link: ApprovalLink): void {
@@ -158,8 +165,8 @@ export const store = {
   },
 
   /** Returns true if the approval was still pending and got decided. */
-  decideApproval(id: string, status: 'approved' | 'rejected', by: string, note: string | null): boolean {
-    const r = stmts.decideApproval.run(status, new Date().toISOString(), by, note, id);
+  decideApproval(id: string, status: 'approved' | 'rejected' | 'expired', by: string, note: string | null, now = new Date()): boolean {
+    const r = stmts.decideApproval.run(status, now.toISOString(), by, note, id);
     return r.changes > 0;
   },
 

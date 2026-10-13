@@ -18,6 +18,8 @@ export const LANG_LABELS: Record<Lang, string> = {
 type Dict = Record<string, string[]>;
 
 const D: Dict = {
+  'notification.failed': ['Phone notification failed', 'Telefonbenachrichtigung fehlgeschlagen', 'Échec de la notification téléphone', 'Falló la notificación al teléfono', 'Notifica al telefono non riuscita', 'Falha na notificação ao telefone', '電話通知に失敗しました', '手机通知发送失败'],
+  'notification.retry': ['Phone notification failed; retry scheduled', 'Telefonbenachrichtigung fehlgeschlagen; erneuter Versuch geplant', 'Notification téléphone échouée ; nouvelle tentative prévue', 'Notificación fallida; reintento programado', 'Notifica non riuscita; nuovo tentativo programmato', 'Falha na notificação; nova tentativa agendada', '電話通知に失敗しました。再試行を予定しています', '手机通知发送失败；已安排重试'],
   // nav
   'nav.overview': ['Overview', 'Übersicht', 'Aperçu', 'Resumen', 'Panoramica', 'Visão geral', '概要', '概览'],
   'nav.approvals': ['Approvals', 'Genehmigungen', 'Approbations', 'Aprobaciones', 'Approvazioni', 'Aprovações', '承認', '审批'],
