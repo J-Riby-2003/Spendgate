@@ -108,3 +108,7 @@ Permission reserves funds; completed spend requires verified settlement. New age
 
 Revisit the bet if: Cloudflare/Coinbase ship cross-rail fiat policy before 100 paying teams;
 no 50 paying teams within 6 months of MVP; or agent payment volume is still microscopic by mid-2027.
+
+## Policy preview and audit history
+
+In Agents & Policy, test an unsaved policy against a sample or compare recent requests using their recorded original context. Preview and replay do not create production requests or reservations. Saves retain versioned before/after history attributed to the signed-in operator, and ledger details show the policy version and original decision context. See [policy simulation](docs/policy-simulation.md) for assumptions, API version requirements and migration behaviour.

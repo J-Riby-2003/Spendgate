@@ -18,7 +18,9 @@ function inWindow(window: { start: string; end: string }, now: Date): boolean {
   const [sh, sm] = window.start.split(':').map(Number);
   const [eh, em] = window.end.split(':').map(Number);
   const cur = now.getUTCHours() * 60 + now.getUTCMinutes();
-  return cur >= sh * 60 + sm && cur <= eh * 60 + em;
+  const start = sh * 60 + sm, end = eh * 60 + em;
+  // UTC minute precision, inclusive endpoints. Equal endpoints permit exactly one minute.
+  return start <= end ? cur >= start && cur <= end : cur >= start || cur <= end;
 }
 
 export function evaluate(policy: Policy, intent: SpendIntent, ctx: EvalContext): EvalResult {

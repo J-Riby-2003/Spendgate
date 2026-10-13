@@ -1,6 +1,8 @@
 import { createBudgetStore } from './budget.js';
 import { isSupportedCurrency } from '../../../shared/currency.js';
 import { BudgetError } from './budget.js';
+import type { PolicyRevision } from './policy-history.js';
+import { PolicyConflict } from './policy-history.js';
 import { migrate } from './migrations.js';
 import { withImmediateTransaction as runImmediate } from './transactions.js';
 // SQLite persistence via node's built-in sqlite (no native deps).
@@ -186,7 +188,7 @@ export const store = {
   },
 
   knownVendors(agentId: string): Set<string> {
-    return new Set((stmts.knownVendors.all(agentId) as { vendor: string }[]).map((r) => r.vendor));
+    return new Set((stmts.knownVendors.all(agentId) as { vendor: string }[]).map((r) => r.vendor.toLowerCase()));
   },
 
   listAgents(): { agentId: string; displayName: string; currency: string }[] {
@@ -216,8 +218,29 @@ export const store = {
     return r ? (JSON.parse(r.json) as Policy) : null;
   },
 
-  upsertPolicy(policy: Policy): void {
-    stmts.upsertPolicy.run(policy.agentId, JSON.stringify(policy));
+  getPolicyVersion(agentId: string): number {
+    return Number(db.prepare('SELECT COALESCE(MAX(version),0) AS version FROM policy_revisions WHERE agent_id=?').get(agentId)!.version);
+  },
+
+  policyHistory(agentId: string, limit = 50): PolicyRevision[] {
+    return db.prepare('SELECT * FROM policy_revisions WHERE agent_id=? ORDER BY version DESC LIMIT ?').all(agentId, limit).map(r => ({
+      agentId: String(r.agent_id), version: Number(r.version), changedAt: String(r.changed_at), changedBy: String(r.changed_by),
+      source: r.source as PolicyRevision['source'], before: r.before_json ? JSON.parse(String(r.before_json)) : null, after: JSON.parse(String(r.after_json)),
+    }));
+  },
+
+  /** Internal writes are versioned too; authenticated API writes must supply actor and expectedVersion. */
+  upsertPolicy(policy: Policy, audit: { expectedVersion?: number; changedBy: string; source: PolicyRevision['source'] } = { changedBy: 'system:internal', source: 'system' }): number {
+    const write = () => {
+      const version = store.getPolicyVersion(policy.agentId);
+      if (audit.expectedVersion != null && audit.expectedVersion !== version) throw new PolicyConflict();
+      const before = store.getPolicy(policy.agentId);
+      db.prepare('INSERT INTO policy_revisions VALUES (?,?,?,?,?,?,?)').run(policy.agentId, version + 1, new Date().toISOString(),
+        audit.changedBy, audit.source, before ? JSON.stringify(before) : null, JSON.stringify(policy));
+      stmts.upsertPolicy.run(policy.agentId, JSON.stringify(policy));
+      return version + 1;
+    };
+    return db.isTransaction ? write() : withImmediateTransaction(write);
   },
 
   pendingApprovals(): ApprovalRequest[] {
