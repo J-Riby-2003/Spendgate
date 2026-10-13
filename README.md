@@ -47,6 +47,8 @@ Unit tests run against a throwaway data dir; e2e starts a separate server on :18
 
 ## Connect a real agent
 
+For guided setup, sign in and choose **Set up an agent**. It creates the initial policy, delivers a scoped credential once, verifies a real MCP client connection and demonstrates decisions in safe simulation mode. Setup resumes after interruption; lost secrets require explicit rotation. Set `SPENDGATE_SEED_DEMO=false` for an empty deployment. See [agent onboarding](docs/agent-onboarding.md) for the journey, recovery and API contracts.
+
 Any MCP client (Claude Code, Claude Desktop, your own):
 
 ```json

@@ -7,6 +7,9 @@ import { submitRequest, waitForRequest, getRequest, EngineError, type RequestSna
 import { budget } from './core/budget-state.js';
 import { BudgetError } from './core/budget.js';
 import { store } from './core/store.js';
+import { checkConnection, testJourneyAsAgent } from './core/onboarding.js';
+import { OnboardingError } from './core/onboarding-store.js';
+import { InputError } from './core/sanitize.js';
 import { formatMinor } from './core/money.js';
 
 export function buildMcpServer(principal: AgentPrincipal, connectionSignal?: AbortSignal): McpServer {
@@ -28,7 +31,7 @@ export function buildMcpServer(principal: AgentPrincipal, connectionSignal?: Abo
       ].join('\n') }] };
   }
   function failure(err: unknown) {
-    const status = err instanceof EngineError || err instanceof AuthError || err instanceof BudgetError ? err.status : 500;
+    const status = err instanceof InputError ? 422 : err instanceof OnboardingError || err instanceof EngineError || err instanceof AuthError || err instanceof BudgetError ? err.status : 500;
     const message = status === 500 ? 'Internal request error' : (err as Error).message;
     return { isError: true, content: [{ type: 'text' as const, text: `SpendGate error (${status}): ${message}` }] };
   }
@@ -36,6 +39,24 @@ export function buildMcpServer(principal: AgentPrincipal, connectionSignal?: Abo
     { name: 'spendgate', version: '0.1.0' },
     { capabilities: { tools: {} } },
   );
+
+  server.tool('connection_check', 'Verify this scoped agent credential against the one-time challenge shown in the onboarding console. Does not submit a spend.', {
+    challenge: z.string().min(1).max(128),
+  }, async ({ challenge }) => {
+    try {
+      const result = checkConnection(principal, challenge);
+      return { structuredContent: result, content: [{ type: 'text', text: `Connection verified for ${result.agentId}. Own-agent permissions confirmed. Return to onboarding and check connection status.` }] };
+    } catch (err) { return failure(err); }
+  });
+  server.tool('onboarding_test', 'Safe onboarding simulation only. Uses saved policy plus labelled unsaved illustrative fixtures. Never creates payments, approvals, reservations or production ledger entries.', {
+    onboardingId: z.string().uuid().describe('Onboarding journey ID from the console'),
+    sample: z.object({ amount: z.number().int().positive().max(1e12), currency: z.string(), vendor: z.string().min(1).max(120), purpose: z.string().min(1).max(280), rail: z.enum(['x402','mpp','ap2','acp','card','stablecoin','mcp']).default('mcp') }),
+  }, async ({ onboardingId, sample }) => {
+    try {
+      const result = testJourneyAsAgent(onboardingId, principal, sample);
+      return { structuredContent: result, content: [{ type: 'text', text: `SIMULATION — ${result.saved.verdict.decision}: ${result.saved.verdict.reason}\n${result.fixtureNotice}\n${result.nextAction}` }] };
+    } catch (err) { return failure(err); }
+  });
 
   server.tool(
     'spend',

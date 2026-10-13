@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { EventEmitter } from 'node:events';
 import type { Request, Response, NextFunction } from 'express';
 import { db, SECRET, store, withImmediateTransaction } from './core/store.js';
+import { attachCredential, credentialJourney, OnboardingError } from './core/onboarding-store.js';
 
 export type OperatorPrincipal = { kind: 'operator'; operatorId: string; sessionId: string };
 export type AgentPrincipal = { kind: 'agent'; agentId: string; credentialId: string };
@@ -95,21 +96,45 @@ function insertCredential(agentId: string) {
   db.prepare('INSERT INTO agent_credentials VALUES (?,?,?,?,NULL)').run(id, agentId, hash(token), Date.now());
   return { id, agentId, secret: token };
 }
-export function issueCredential(agentId: string, operatorId: string) {
-  return withImmediateTransaction(() => { const c = insertCredential(agentId); audit('credential.created', operatorId, agentId, c.id); return c; });
+type IssuedCredential = { id: string; agentId: string; secret: string };
+type CredentialDelivery = { id: string; agentId: string; secret: string | null };
+export function issueCredential(agentId: string, operatorId: string): IssuedCredential;
+export function issueCredential(agentId: string, operatorId: string, onboardingId: string): CredentialDelivery;
+export function issueCredential(agentId: string, operatorId: string, onboardingId?: string): CredentialDelivery {
+  return withImmediateTransaction(() => {
+    const journey = onboardingId === undefined ? null : credentialJourney(onboardingId, operatorId, agentId);
+    if (journey?.credential_id) return { id: String(journey.credential_id), agentId, secret: null };
+    const c = insertCredential(agentId); audit('credential.created', operatorId, agentId, c.id);
+    if (onboardingId !== undefined) attachCredential(onboardingId, c.id);
+    return c;
+  });
 }
 function activeCredential(agentId: string, id: string): void {
   if (!db.prepare('SELECT id FROM agent_credentials WHERE id=? AND agent_id=? AND revoked_at IS NULL').get(id, agentId)) throw new AuthError('Unknown or revoked credential', 404);
 }
-export function rotateCredential(agentId: string, id: string, operatorId: string) {
+export function rotateCredential(agentId: string, id: string, operatorId: string): IssuedCredential;
+export function rotateCredential(agentId: string, id: string, operatorId: string, onboardingId: string): CredentialDelivery;
+export function rotateCredential(agentId: string, id: string, operatorId: string, onboardingId?: string): CredentialDelivery {
+  let revoked = false;
   const next = withImmediateTransaction(() => {
-    activeCredential(agentId, id);
+    const journey = onboardingId === undefined ? null : credentialJourney(onboardingId, operatorId, agentId);
+    if (journey && journey.credential_id !== id) {
+      const retry = db.prepare("SELECT 1 FROM security_audit_events WHERE event='credential.rotated' AND operator_id=? AND agent_id=? AND credential_id=? AND replacement_id=?")
+        .get(operatorId, agentId, id, journey.credential_id);
+      if (!retry) throw new OnboardingError('Credential changed. Reload setup before rotating.');
+      return { id: String(journey.credential_id), agentId, secret: null };
+    }
+    if (journey) {
+      if (!db.prepare('SELECT 1 FROM agent_credentials WHERE id=? AND agent_id=?').get(id, agentId)) throw new AuthError('Unknown credential', 404);
+    } else activeCredential(agentId, id);
     const c = insertCredential(agentId);
     db.prepare('UPDATE agent_credentials SET revoked_at=? WHERE id=?').run(Date.now(), id);
     audit('credential.rotated', operatorId, agentId, id, c.id);
+    if (onboardingId !== undefined) attachCredential(onboardingId, c.id);
+    revoked = true;
     return c;
   });
-  authEvents.emit('credential-revoked', id);
+  if (revoked) authEvents.emit('credential-revoked', id);
   return next;
 }
 export function revokeCredential(agentId: string, id: string, operatorId: string): void {

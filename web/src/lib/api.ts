@@ -271,3 +271,19 @@ export async function fetchPolicyHistory(agentId: string): Promise<PolicyRevisio
 export async function fetchPolicyEvidence(requestId: string): Promise<PolicyEvidence> {
   const res = await fetch(`/api/requests/${encodeURIComponent(requestId)}/evidence`); await checkOk(res, 'decision evidence'); return res.json();
 }
+
+export interface OnboardingDraft { agentId: string; displayName: string; currency: string; policy?: Policy }
+export interface OnboardingJourney {
+  id: string; revision: number; draft: Partial<OnboardingDraft>; agentId: string | null; agentExists: boolean;
+  credentialId: string | null; credentialActive: boolean; connectedAt: string | null; testedAt: string | null; completedAt: string | null; abandonedAt: string | null;
+}
+export interface OnboardingTests {
+  mode: 'simulation'; saved: PolicyPreview;
+  examples: { label: string; policy: Policy; sample: { amount: number; currency: string; vendor: string }; preview: PolicyPreview }[];
+  fixtureNotice: string; nextAction: string;
+}
+export async function onboardingRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+  const res = await fetch(`/api/${path}`, { method, headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: body === undefined ? undefined : JSON.stringify(body) });
+  await checkOk(res, 'onboarding'); return res.json();
+}
