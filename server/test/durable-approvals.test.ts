@@ -132,3 +132,10 @@ it('classifies Telegram authentication failures as permanent and rate limits as 
   await deliverNotifications(telegramNotifier({ botToken: 'secret', chatId: 'chat', baseUrl: 'https://gate.example', fetchImpl: async () => new Response('{"ok":false,"error_code":429,"description":"secret"}', { status: 200 }) }));
   expect(db.prepare('SELECT status,last_error FROM notification_outbox WHERE approval_id=?').get(rateLimited.approvalId!)).toMatchObject({ status: 'retry', last_error: 'Provider status 429' });
 });
+it('redacts malformed Telegram error codes instead of persisting upstream text as a status', async () => {
+  const { deliverNotifications, telegramNotifier } = await import('../src/notify.js');
+  db.prepare("UPDATE notification_outbox SET status='obsolete'").run();
+  const pending = engine.submitRequest({ ...input, idempotencyKey: 'malformed-provider' });
+  await deliverNotifications(telegramNotifier({ botToken: 'secret', chatId: 'chat', baseUrl: 'https://gate.example', fetchImpl: async () => new Response('{"ok":false,"error_code":"secret-provider-text"}', { status: 200 }) }));
+  expect(db.prepare('SELECT status,last_error FROM notification_outbox WHERE approval_id=?').get(pending.approvalId!)).toMatchObject({ status: 'retry', last_error: 'Provider status 502' });
+});

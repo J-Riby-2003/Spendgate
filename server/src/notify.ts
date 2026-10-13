@@ -114,7 +114,12 @@ export function resolveNotifier(env: NodeJS.ProcessEnv = process.env): Notifier 
 
 
 export class NotificationDeliveryError extends Error {
-  constructor(public status: number) { super(`Notification provider status ${status}`); }
+  readonly status: number;
+  constructor(status: unknown) {
+    const code = typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599 ? status : 502;
+    super(`Notification provider status ${code}`);
+    this.status = code;
+  }
 }
 
 /** At-least-once external delivery with persisted, exclusively leased jobs. */
