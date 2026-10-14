@@ -12,3 +12,6 @@ dist/
 .DS_Store
 playwright-report/
 test-results/
+
+# founder research & business notes — private, never publish
+founder/

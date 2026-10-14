@@ -3,6 +3,10 @@
 **The policy and approval layer above every agent payment rail.**
 A Britannic & Balkan project.
 
+> **Status: v0.1, pre-payment-execution.** SpendGate decides and records; it does
+> not yet move money or verify supplier charges. See [SECURITY.md](SECURITY.md)
+> for the trust model.
+
 Agents route payment intents through the SpendGate MCP server. Policy decides:
 auto-allow, hard-deny, or escalate to a human. Every intent — allowed or not —
 lands in a SHA-256 hash-chained, HMAC-signed audit ledger.
@@ -114,3 +118,20 @@ no 50 paying teams within 6 months of MVP; or agent payment volume is still micr
 ## Policy preview and audit history
 
 In Agents & Policy, test an unsaved policy against a sample or compare recent requests using their recorded original context. Preview and replay do not create production requests or reservations. Saves retain versioned before/after history attributed to the signed-in operator, and ledger details show the policy version and original decision context. See [policy simulation](docs/policy-simulation.md) for assumptions, API version requirements and migration behaviour.
+
+## Contributing
+
+Issues and PRs welcome. Run `npm run typecheck` and `npm run test` before
+opening a PR. If you're adding a feature, the design questions that matter:
+does it preserve default-deny, and does every new decision path land in the
+signed ledger?
+
+## Security
+
+See [SECURITY.md](SECURITY.md) — trust model, vulnerability reporting, and a
+hardening checklist. Please report vulnerabilities privately before opening a
+public issue.
+
+## License
+
+Apache 2.0 — see [LICENSE](LICENSE).
