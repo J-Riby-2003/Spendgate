@@ -25,11 +25,16 @@ about what it does and doesn't protect:
   holds both the signing key (`.spendgate/secret.key`) and the database — the
   chain proves continuity, not independence. External anchoring (e.g. daily
   Merkle root elsewhere) is future work.
-- **One bearer token protects all mutations and the MCP endpoint.** Read-only
-  GETs and `/ws` are unauthenticated. Do not expose port 8787 to the internet.
-  Per-agent scoped credentials are planned, not implemented.
-- **Agent identity is self-declared.** Any client presenting the token can claim
-  any agent name. Real deployments need per-agent keys.
+- **Operator sessions and per-agent credentials, not a shared token.**
+  Operators sign in with expiring browser sessions; each agent gets its own
+  revocable scoped credential, verified by a one-time challenge during
+  onboarding. Console reads, exports and `/ws` require an operator session;
+  the MCP endpoint requires an agent credential. Still run behind TLS with a
+  restricted network — see the hardening checklist below.
+- **Agent identity is as strong as the credential.** Each agent acts through its
+  own revocable credential, verified at onboarding — but the credential is a
+  bearer token, so anyone holding it acts as that agent. Rotate promptly on
+  suspicion of leakage; that requires explicit operator action today.
 - **Approval links are single-use and expire** with their escalation, and raw
   tokens are stored only as sha256 — but anyone holding a minted link can decide
   it, so treat links as secrets while pending.
@@ -42,8 +47,8 @@ about what it does and doesn't protect:
 
 1. Run behind a reverse proxy with TLS and network restrictions, not on the
    open internet.
-2. Restrict the console token (`SPENDGATE_TOKEN`) to the operator; rotate it if
-   it ever leaks.
+2. Protect operator sessions (don't sign in on shared machines) and treat agent
+   credentials as secrets; revoke and re-issue from the console if one leaks.
 3. Back up `.spendgate/` — losing the signing key means the existing chain can
    no longer be extended-verified against new rows.
 4. Keep `SPENDGATE_TELEGRAM_*` values in `.spendgate/env` (gitignored), never

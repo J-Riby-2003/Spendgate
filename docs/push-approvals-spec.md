@@ -1,6 +1,6 @@
 # Roadmap #4 — Phone/push approvals (spec)
 
-**Status:** spec, not started. **Goal:** an escalated spend reaches James's phone in seconds; one tap approves or rejects; the blocked agent's MCP call resolves exactly as if the decision happened in the console.
+**Status:** spec, not started. **Goal:** an escalated spend reaches the operator's phone in seconds; one tap approves or rejects; the blocked agent's MCP call resolves exactly as if the decision happened in the console.
 
 ## Problem
 
@@ -40,7 +40,7 @@ notify/
 Config (all env, zero new deps for the interface; `form-data`-free — Telegram accepts URL-encoded bodies):
 
 - `SPENDGATE_TELEGRAM_BOT_TOKEN` — from @BotFather
-- `SPENDGATE_TELEGRAM_CHAT_ID` — James's chat id (send `/start` to the bot, read it from the server log)
+- `SPENDGATE_TELEGRAM_CHAT_ID` — the operator's chat id (send `/start` to the bot, read it from the server log)
 
 ### Decision tokens (the security core)
 

@@ -13,7 +13,7 @@ export function PageHeader({ title, sub, right }: { title: string; sub: string; 
 }
 
 // Vibrant status fills (arbitrary hex so they hot-reload without a
-// tailwind.config change); white text per James's spec.
+// tailwind.config change); white text per spec.
 const TONES: Record<string, string> = {
   ALLOWED: 'bg-[#4CAF50]',
   APPROVED: 'bg-[#4CAF50]',
