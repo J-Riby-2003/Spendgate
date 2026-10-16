@@ -92,7 +92,7 @@ SPENDGATE_TELEGRAM_CHAT_ID=456
 SPENDGATE_PUBLIC_BASE_URL=https://your-tunnel.example
 ```
 
-`SPENDGATE_PUBLIC_BASE_URL` only matters off-LAN — it's the origin baked into the phone link buttons. Restart the server; the startup banner confirms `Notifications: telegram push approvals`. See `docs/push-approvals-spec.md` for the design.
+`SPENDGATE_PUBLIC_BASE_URL` only matters off-LAN — it's the origin baked into the phone link buttons. Restart the server; the startup banner confirms `Notifications: telegram push approvals`.
 
 
 Then the agent calls `spend(agent, amount, currency, vendor, purpose, rail)` —
@@ -100,12 +100,12 @@ amount in pence/cents.
 
 ## Budget accounting
 
-Permission reserves funds; completed spend requires verified settlement. New agents use hard-stop budgets; migrated policies preserve approval-override mode. Operators must review unknown legacy obligations before authorising new work. See [budget-accounting.md](docs/budget-accounting.md) for UTC rollover rules, precision, shared APIs and the #2/#7 integration boundary. This branch does not execute or settle payments.
+Permission reserves funds; completed spend requires verified settlement. New agents use hard-stop budgets; migrated policies preserve approval-override mode. Operators must review unknown legacy obligations before authorising new work. This branch does not execute or settle payments.
 
 ## Honest prototype limits (next steps)
 
-- Approval expiry defaults to 5 minutes, configurable from 1 minute to 7 days. Deferred MCP/status and durable notification retries are described in [durable approvals](docs/durable-approvals.md).
-- Budget accounting uses one configured currency per agent, explicit modes and persistent reservations. See [budget accounting](docs/budget-accounting.md) for migration, reconciliation and execution integration obligations.
+- Approval expiry defaults to 5 minutes, configurable from 1 minute to 7 days; deferred MCP/status polls and durable notification retries survive reconnects and restarts.
+- Budget accounting uses one configured currency per agent, explicit modes and persistent reservations.
 - Agent identity is bound to revocable per-agent credentials. One provisioned operator is supported initially; SSO and multi-workspace tenancy are future work.
 - Ledger signing key is per-server; enterprise wants per-workspace keys + external anchoring (e.g. daily Merkle root).
 - Existing deployments must migrate from the shared token to operator sessions and per-agent credentials. Production requires HTTPS and a configured public console origin; see the migration guide.
@@ -117,7 +117,7 @@ no 50 paying teams within 6 months of MVP; or agent payment volume is still micr
 
 ## Policy preview and audit history
 
-In Agents & Policy, test an unsaved policy against a sample or compare recent requests using their recorded original context. Preview and replay do not create production requests or reservations. Saves retain versioned before/after history attributed to the signed-in operator, and ledger details show the policy version and original decision context. See [policy simulation](docs/policy-simulation.md) for assumptions, API version requirements and migration behaviour.
+In Agents & Policy, test an unsaved policy against a sample or compare recent requests using their recorded original context. Preview and replay do not create production requests or reservations. Saves retain versioned before/after history attributed to the signed-in operator, and ledger details show the policy version and original decision context.
 
 ## Contributing
 

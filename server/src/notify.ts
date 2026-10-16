@@ -1,4 +1,4 @@
-// Push notifications for escalations — Telegram first (see docs/push-approvals-spec.md).
+// Push notifications for escalations — Telegram first.
 // Subscribes to the engine's approval events and pushes a fresh decision-link
 // pair for every new escalation. Fire-and-forget: a failed push never blocks
 // the agent — the console and the expiry timeout remain the fallback.
