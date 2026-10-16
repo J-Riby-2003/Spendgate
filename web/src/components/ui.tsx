@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 
-// Compact, institutional chrome. Single type family (Montserrat) —
-// see DESIGN.md at the project root; that file is the source of truth.
+// Compact, institutional chrome. Single type family (Montserrat),
+// theme tokens in web/tailwind.config.js.
 
 export function PageHeader({ title, sub, right }: { title: string; sub: string; right?: ReactNode }) {
   return (
