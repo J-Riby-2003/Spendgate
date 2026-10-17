@@ -97,9 +97,9 @@ export default function Onboarding() {
     try { await navigator.clipboard.writeText(value); setNotice('Copied.'); }
     catch { setNotice('Clipboard unavailable. Select and copy the text.'); }
   }
-  const configuration = JSON.stringify({ mcpServers: { spendlock: { type: 'http', url: `${location.origin}/mcp`, headers: { Authorization: 'Bearer ${SPENDLOCK_AGENT_TOKEN}' } } } }, null, 2);
-  const prompt = challenge ? `Use SpendLock connection_check with ${JSON.stringify({ challenge: challenge.challenge })}. This is a connection check only; do not call spend.` : '';
-  const testPrompt = journey ? `Use SpendLock onboarding_test with ${JSON.stringify({ onboardingId: journey.id, sample: { amount: toMinor(amount, currency), currency, vendor, purpose, rail: 'mcp' } })}. This is simulation only; do not call spend.` : '';
+  const configuration = JSON.stringify({ mcpServers: { tollkeep: { type: 'http', url: `${location.origin}/mcp`, headers: { Authorization: 'Bearer ${TOLLKEEP_AGENT_TOKEN}' } } } }, null, 2);
+  const prompt = challenge ? `Use Tollkeep connection_check with ${JSON.stringify({ challenge: challenge.challenge })}. This is a connection check only; do not call spend.` : '';
+  const testPrompt = journey ? `Use Tollkeep onboarding_test with ${JSON.stringify({ onboardingId: journey.id, sample: { amount: toMinor(amount, currency), currency, vendor, purpose, rail: 'mcp' } })}. This is simulation only; do not call spend.` : '';
 
   return <div>
     <PageHeader title="Set up an agent" sub="" />
@@ -139,7 +139,7 @@ export default function Onboarding() {
       </form>}
       {step === 'credential' && <div className="space-y-4 max-w-2xl">
         <h2 className="text-lg font-semibold">Agent credential</h2>
-        <p className="text-sm">This credential accesses only {journey.agentId}. Store it in your agent’s secret manager and load it as SPENDLOCK_AGENT_TOKEN in the environment used to launch Claude Code. Keep it out of source control, chat messages and shell history.</p>
+        <p className="text-sm">This credential accesses only {journey.agentId}. Store it in your agent’s secret manager and load it as TOLLKEEP_AGENT_TOKEN in the environment used to launch Claude Code. Keep it out of source control, chat messages and shell history.</p>
         {secret ? <>
           <label className="block text-sm">New agent credential<input type={reveal ? 'text' : 'password'} readOnly autoComplete="off" value={secret} className={inputClass} /></label>
           <div className="flex flex-wrap gap-3"><button className="text-sm underline" onClick={() => setReveal(!reveal)}>{reveal ? 'Hide' : 'Reveal'} credential</button><button className="text-sm underline" onClick={() => void copy(secret)}>Copy credential</button></div>
@@ -167,7 +167,7 @@ export default function Onboarding() {
           <pre className="border border-line rounded-md p-3 text-xs whitespace-pre-wrap break-all">{prompt}</pre>
           <button className="text-sm underline" onClick={() => void copy(prompt)}>Copy connection request</button>
         </>}
-        {journey.connectedAt ? <p role="status" className="text-ok text-sm">MCP connection verified</p> : <p className="text-sm">Authentication error: check SPENDLOCK_AGENT_TOKEN, restart the client after rotation and use the current challenge. Network error: check the endpoint and server availability. Expired challenge: request a fresh one.</p>}
+        {journey.connectedAt ? <p role="status" className="text-ok text-sm">MCP connection verified</p> : <p className="text-sm">Authentication error: check TOLLKEEP_AGENT_TOKEN, restart the client after rotation and use the current challenge. Network error: check the endpoint and server availability. Expired challenge: request a fresh one.</p>}
         <div className="flex flex-wrap gap-3">
           <button disabled={busy} className="text-sm underline" onClick={() => { setSecret(''); setStep('credential'); }}>Credential recovery</button>
           <button disabled={busy} className={buttonClass} onClick={() => void perform(async () => {

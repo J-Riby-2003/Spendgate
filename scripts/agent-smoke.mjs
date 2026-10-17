@@ -1,4 +1,4 @@
-// Real-agent smoke test: connects to SpendLock over the MCP protocol
+// Real-agent smoke test: connects to Tollkeep over the MCP protocol
 // (Streamable HTTP, exactly like Claude Code / any MCP client would) and
 // drives every tool the way an autonomous agent would.
 //
@@ -9,8 +9,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-const ENDPOINT = process.env.SPENDLOCK_URL ?? 'http://localhost:8787/mcp';
-const credentials = JSON.parse(process.env.SPENDLOCK_AGENT_CREDENTIALS ?? '{}');
+const ENDPOINT = process.env.TOLLKEEP_URL ?? 'http://localhost:8787/mcp';
+const credentials = JSON.parse(process.env.TOLLKEEP_AGENT_CREDENTIALS ?? '{}');
 // per-run nonce so idempotency keys are hermetic across runs
 const RUN = Date.now().toString(36);
 let failures = 0;
@@ -25,7 +25,7 @@ const clients = new Map();
 async function clientFor(agentId) {
   if (clients.has(agentId)) return clients.get(agentId);
   if (!credentials[agentId]) throw new Error(`Missing scoped credential for ${agentId}; see docs/access-and-migration.md`);
-  const client = new Client({ name: 'spendlock-smoke-agent', version: '0.1.0' });
+  const client = new Client({ name: 'tollkeep-smoke-agent', version: '0.1.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(ENDPOINT), { requestInit: { headers: { Authorization: `Bearer ${credentials[agentId]}` } } }));
   clients.set(agentId, client); return client;
 }
@@ -151,5 +151,5 @@ report(
 );
 
 for (const connection of clients.values()) await connection.close();
-console.log(failures === 0 ? '\nAll checks passed — SpendLock works over real MCP.' : `\n${failures} check(s) FAILED`);
+console.log(failures === 0 ? '\nAll checks passed — Tollkeep works over real MCP.' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

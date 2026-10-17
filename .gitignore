@@ -5,7 +5,7 @@ node_modules/
 dist/
 
 # runtime data — NEVER commit (contains the ledger signing key)
-.spendlock/
+.tollkeep/
 
 # logs & OS noise
 *.log

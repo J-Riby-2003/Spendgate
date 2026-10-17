@@ -1,5 +1,5 @@
 import { beforeAll, expect, it, vi } from 'vitest';
-vi.hoisted(() => { process.env.SPENDLOCK_DATA = `/tmp/spendlock-durable-${Date.now()}-${Math.random()}`; });
+vi.hoisted(() => { process.env.TOLLKEEP_DATA = `/tmp/tollkeep-durable-${Date.now()}-${Math.random()}`; });
 import * as engine from '../src/core/engine.js';
 import { store, db } from '../src/core/store.js';
 import { budget } from '../src/core/budget-state.js';
@@ -68,13 +68,13 @@ it('rolls finalisation back if the ledger write fails, including reservation and
   expect(decideByToken(links[0].token).decision).toBe('approved');
 });
 it('rejects invalid configured expiry bounds and preserves existing deadlines', () => {
-  for (const value of ['0', 'NaN', '59999', '604800001', '60000.5']) expect(() => engine.approvalTimeout({ SPENDLOCK_APPROVAL_TIMEOUT_MS: value })).toThrow(/60000/);
-  expect(engine.approvalTimeout({ SPENDLOCK_APPROVAL_TIMEOUT_MS: '60000' })).toBe(60000);
-  expect(engine.approvalTimeout({ SPENDLOCK_APPROVAL_TIMEOUT_MS: '604800000' })).toBe(604800000);
+  for (const value of ['0', 'NaN', '59999', '604800001', '60000.5']) expect(() => engine.approvalTimeout({ TOLLKEEP_APPROVAL_TIMEOUT_MS: value })).toThrow(/60000/);
+  expect(engine.approvalTimeout({ TOLLKEEP_APPROVAL_TIMEOUT_MS: '60000' })).toBe(60000);
+  expect(engine.approvalTimeout({ TOLLKEEP_APPROVAL_TIMEOUT_MS: '604800000' })).toBe(604800000);
   const pending = engine.submitRequest({ ...input, idempotencyKey: 'immutable-expiry' });
-  process.env.SPENDLOCK_APPROVAL_TIMEOUT_MS = '60000';
+  process.env.TOLLKEEP_APPROVAL_TIMEOUT_MS = '60000';
   expect(engine.getRequest(input.agentId, pending.requestId).expiresAt).toBe(pending.expiresAt);
-  delete process.env.SPENDLOCK_APPROVAL_TIMEOUT_MS;
+  delete process.env.TOLLKEEP_APPROVAL_TIMEOUT_MS;
 });
 it('persists failed delivery, retries once due, and suppresses already-final jobs', async () => {
   const { deliverNotifications } = await import('../src/notify.js');

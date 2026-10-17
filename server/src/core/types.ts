@@ -1,4 +1,4 @@
-// Shared domain types for SpendLock core.
+// Shared domain types for Tollkeep core.
 
 export type Rail = 'x402' | 'mpp' | 'ap2' | 'acp' | 'card' | 'stablecoin' | 'mcp';
 

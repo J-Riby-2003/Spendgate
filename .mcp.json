@@ -1,5 +1,5 @@
 {
   "mcpServers": {
-    "spendlock": { "url": "http://localhost:8787/mcp" }
+    "tollkeep": { "url": "http://localhost:8787/mcp" }
   }
 }

@@ -10,7 +10,7 @@ import { migrate } from '../src/core/migrations.js';
 import { createBudgetStore } from '../src/core/budget.js';
 import { withImmediateTransaction } from '../src/core/transactions.js';
 it('serialises independent processes and recovers persisted holds after closing and reopening the database', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'spendlock-budget-race-')), path = join(dir, 'test.db');
+  const dir = mkdtempSync(join(tmpdir(), 'tollkeep-budget-race-')), path = join(dir, 'test.db');
   const setup = new DatabaseSync(path); setup.exec('PRAGMA journal_mode = WAL'); migrate(setup);
   setup.exec(`INSERT INTO agents VALUES ('a','A','GBP'); INSERT INTO policies VALUES ('a','{"dailyBudget":10000,"budgetMode":"hard-stop"}')`); setup.close();
   const children = ['one','two'].map(id => fork(fileURLToPath(new URL('./fixtures/budget-writer.ts', import.meta.url)), [path, id], { execArgv: ['--import', 'tsx'], stdio: ['ignore','ignore','pipe','ipc'] }));

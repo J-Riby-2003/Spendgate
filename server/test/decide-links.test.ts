@@ -3,8 +3,8 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 const env = vi.hoisted(() => {
-  process.env.SPENDLOCK_DATA = `/tmp/spendlock-test-links-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return process.env.SPENDLOCK_DATA;
+  process.env.TOLLKEEP_DATA = `/tmp/tollkeep-test-links-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return process.env.TOLLKEEP_DATA;
 });
 
 import { decide, submitSpend } from '../src/core/engine.js';

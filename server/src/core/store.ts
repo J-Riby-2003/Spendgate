@@ -13,10 +13,10 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { ApprovalRequest, LedgerEntry, Policy } from './types.js';
 
-const DATA_DIR = process.env.SPENDLOCK_DATA ?? join(process.cwd(), '..', '.spendlock');
+const DATA_DIR = process.env.TOLLKEEP_DATA ?? join(process.cwd(), '..', '.tollkeep');
 mkdirSync(DATA_DIR, { recursive: true });
 
-export const db = new DatabaseSync(join(DATA_DIR, 'spendlock.db'));
+export const db = new DatabaseSync(join(DATA_DIR, 'tollkeep.db'));
 
 configureSqlite(db);
 migrate(db);

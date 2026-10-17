@@ -1,13 +1,13 @@
-# SpendLock
+# Tollkeep
 
 **The policy and approval layer above every agent payment rail.**
 A Britannic & Balkan project.
 
-> **Status: v0.1, pre-payment-execution.** SpendLock decides and records; it does
+> **Status: v0.1, pre-payment-execution.** Tollkeep decides and records; it does
 > not yet move money or verify supplier charges. See [SECURITY.md](SECURITY.md)
 > for the trust model.
 
-Agents route payment intents through the SpendLock MCP server. Policy decides:
+Agents route payment intents through the Tollkeep MCP server. Policy decides:
 auto-allow, hard-deny, or escalate to a human. Every intent — allowed or not —
 lands in a SHA-256 hash-chained, HMAC-signed audit ledger.
 
@@ -47,18 +47,18 @@ Unit tests run against a throwaway data dir; e2e starts a separate server on :18
 - **Default-deny posture**: unknown agent → rejected; no policy → rejected; ambiguous → human.
 - **Budget modes are explicit** — blocked vendors and hard-stop budget overruns deny. Approval-override permits an authenticated operator to exceed available funds with a recorded reason; other ambiguous policy rules escalate.
 - **SQLite via `node:sqlite`** — zero native dependencies, one less thing to break.
-- Signing key lives in `.spendlock/secret.key` (mode 0600), outside the database.
+- Signing key lives in `.tollkeep/secret.key` (mode 0600), outside the database.
 
 ## Connect a real agent
 
-For guided setup, sign in and choose **Set up an agent**. It creates the initial policy, delivers a scoped credential once, verifies a real MCP client connection and demonstrates decisions in safe simulation mode. Setup resumes after interruption; lost secrets require explicit rotation. Set `SPENDLOCK_SEED_DEMO=false` for an empty deployment. See [agent onboarding](docs/agent-onboarding.md) for the journey, recovery and API contracts.
+For guided setup, sign in and choose **Set up an agent**. It creates the initial policy, delivers a scoped credential once, verifies a real MCP client connection and demonstrates decisions in safe simulation mode. Setup resumes after interruption; lost secrets require explicit rotation. Set `TOLLKEEP_SEED_DEMO=false` for an empty deployment. See [agent onboarding](docs/agent-onboarding.md) for the journey, recovery and API contracts.
 
 Any MCP client (Claude Code, Claude Desktop, your own):
 
 ```json
 {
   "mcpServers": {
-    "spendlock": {
+    "tollkeep": {
       "url": "http://localhost:8787/mcp",
       "headers": { "Authorization": "Bearer <agent-credential>" }
     }
@@ -84,15 +84,15 @@ Every new escalation arrives on your phone with Approve/Reject buttons — no co
 
 1. Telegram → **@BotFather** → `/newbot` → copy the token.
 2. Text your new bot anything, then open `https://api.telegram.org/bot<token>/getUpdates` and copy your `chat.id`.
-3. Put both in `.spendlock/env` (auto-loaded by the server, already gitignored):
+3. Put both in `.tollkeep/env` (auto-loaded by the server, already gitignored):
 
 ```
-SPENDLOCK_TELEGRAM_BOT_TOKEN=123:abc
-SPENDLOCK_TELEGRAM_CHAT_ID=456
-SPENDLOCK_PUBLIC_BASE_URL=https://your-tunnel.example
+TOLLKEEP_TELEGRAM_BOT_TOKEN=123:abc
+TOLLKEEP_TELEGRAM_CHAT_ID=456
+TOLLKEEP_PUBLIC_BASE_URL=https://your-tunnel.example
 ```
 
-`SPENDLOCK_PUBLIC_BASE_URL` only matters off-LAN — it's the origin baked into the phone link buttons. Restart the server; the startup banner confirms `Notifications: telegram push approvals`.
+`TOLLKEEP_PUBLIC_BASE_URL` only matters off-LAN — it's the origin baked into the phone link buttons. Restart the server; the startup banner confirms `Notifications: telegram push approvals`.
 
 
 Then the agent calls `spend(agent, amount, currency, vendor, purpose, rail)` —

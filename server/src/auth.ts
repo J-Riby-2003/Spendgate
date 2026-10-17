@@ -21,8 +21,8 @@ function boundedSeconds(name: string, fallback: number, min: number, max: number
   if (!Number.isInteger(n) || n < min || n > max) throw new Error(`Invalid ${name}: expected ${min}–${max} seconds`);
   return n * 1000;
 }
-export const IDLE_MS = boundedSeconds('SPENDLOCK_SESSION_IDLE_SECONDS', 1800, 60, 86400);
-export const ABSOLUTE_MS = boundedSeconds('SPENDLOCK_SESSION_ABSOLUTE_SECONDS', 28800, 300, 604800);
+export const IDLE_MS = boundedSeconds('TOLLKEEP_SESSION_IDLE_SECONDS', 1800, 60, 86400);
+export const ABSOLUTE_MS = boundedSeconds('TOLLKEEP_SESSION_ABSOLUTE_SECONDS', 28800, 300, 604800);
 export function csrfToken(token: string): string { return createHmac('sha256', SECRET).update(`csrf:${token}`).digest('base64url'); }
 function equal(a: string, b: string): boolean {
   const x = Buffer.from(a); const y = Buffer.from(b);
@@ -195,7 +195,7 @@ export function requireAgent(req: Request, res: Response, next: NextFunction): v
 export function allowedOrigin(req: Pick<Request, 'headers'>): boolean {
   const origin = req.headers.origin;
   if (!origin || origin === 'null') return false;
-  const configured = process.env.SPENDLOCK_PUBLIC_BASE_URL;
+  const configured = process.env.TOLLKEEP_PUBLIC_BASE_URL;
   if (configured) { try { return origin === new URL(configured).origin; } catch { return false; } }
   if (process.env.NODE_ENV === 'production') return false;
   return origin === `http://${req.headers.host}`;

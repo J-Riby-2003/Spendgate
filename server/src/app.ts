@@ -1,5 +1,5 @@
-// SpendLock server: REST console API + WebSocket live feed + MCP (Streamable HTTP).
-import './config.js'; // loads .spendlock/env — must run before any env reads
+// Tollkeep server: REST console API + WebSocket live feed + MCP (Streamable HTTP).
+import './config.js'; // loads .tollkeep/env — must run before any env reads
 import express from 'express';
 import { createServer } from 'node:http';
 import { existsSync } from 'node:fs';
@@ -32,7 +32,7 @@ app.use((_req, res, next) => { res.setHeader('Referrer-Policy', 'no-referrer'); 
 app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 app.use(express.json({ limit: '256kb' }));
 
-if (process.env.SPENDLOCK_SEED_DEMO !== 'false') seed();
+if (process.env.TOLLKEEP_SEED_DEMO !== 'false') seed();
 expireStale(); // reconcile overdue durable requests before accepting traffic or delivering links
 
 // push a decision-link pair to Telegram (if configured) for every new escalation
@@ -131,13 +131,13 @@ app.get('/api/ledger', (req, res) => {
 app.get('/api/ledger/verify', (_req, res) => res.json(verifyLedger()));
 
 app.get('/api/export.json', (_req, res) => {
-  res.setHeader('Content-Disposition', 'attachment; filename="spendlock-ledger.json"');
+  res.setHeader('Content-Disposition', 'attachment; filename="tollkeep-ledger.json"');
   res.json({ exportedAt: new Date().toISOString(), entries: store.fullLedger(), verify: verifyLedger() });
 });
 
 app.get('/api/export.csv', (_req, res) => {
   res.setHeader('Content-Type', 'text/csv');
-  res.setHeader('Content-Disposition', 'attachment; filename="spendlock-ledger.csv"');
+  res.setHeader('Content-Disposition', 'attachment; filename="tollkeep-ledger.csv"');
   res.send(ledgerToCsv(store.fullLedger()));
 });
 

@@ -33,10 +33,10 @@ export function buildMcpServer(principal: AgentPrincipal, connectionSignal?: Abo
   function failure(err: unknown) {
     const status = err instanceof InputError ? 422 : err instanceof OnboardingError || err instanceof EngineError || err instanceof AuthError || err instanceof BudgetError ? err.status : 500;
     const message = status === 500 ? 'Internal request error' : (err as Error).message;
-    return { isError: true, content: [{ type: 'text' as const, text: `SpendLock error (${status}): ${message}` }] };
+    return { isError: true, content: [{ type: 'text' as const, text: `Tollkeep error (${status}): ${message}` }] };
   }
   const server = new McpServer(
-    { name: 'spendlock', version: '0.1.0' },
+    { name: 'tollkeep', version: '0.1.0' },
     { capabilities: { tools: {} } },
   );
 
@@ -60,12 +60,12 @@ export function buildMcpServer(principal: AgentPrincipal, connectionSignal?: Abo
 
   server.tool(
     'spend',
-    `Route a payment intent through SpendLock policy. Returns the decision: ALLOWED, DENIED, APPROVED or REJECTED.
+    `Route a payment intent through Tollkeep policy. Returns the decision: ALLOWED, DENIED, APPROVED or REJECTED.
 - Blocked vendors and hard-stop budget overruns are denied instantly.
 - Ambiguous cases escalate to a human. Blocking remains the default; deferred=true returns PENDING and a durable requestId immediately.
 - Permission reserves funds; only verified settlement records completed spend.`,
     {
-      agent: z.string().min(1).max(64).optional().describe('Agent id registered in SpendLock, e.g. "procurement-02"'),
+      agent: z.string().min(1).max(64).optional().describe('Agent id registered in Tollkeep, e.g. "procurement-02"'),
       amount: z.number().int().positive().max(1e12).describe('Amount in minor units (pence/cents) — money is never a float'),
       currency: z.string().regex(/^[A-Za-z]{3}$/).describe('ISO 4217, e.g. GBP, USD'),
       vendor: z.string().min(1).max(120).describe('Who gets paid'),

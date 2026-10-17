@@ -3,8 +3,8 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 const env = vi.hoisted(() => {
-  process.env.SPENDLOCK_DATA = `/tmp/spendlock-test-expire-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return process.env.SPENDLOCK_DATA;
+  process.env.TOLLKEEP_DATA = `/tmp/tollkeep-test-expire-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return process.env.TOLLKEEP_DATA;
 });
 
 import { expireStale } from '../src/core/engine.js';

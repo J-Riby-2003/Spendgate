@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Email **support@britannicbalkan.com** with the subject `SpendLock security`.
+Email **support@britannicbalkan.com** with the subject `Tollkeep security`.
 Please include: affected version/commit, reproduction steps, and impact. You'll
 get an acknowledgement within 48 hours. Please don't open a public issue for
 unfixed vulnerabilities.
@@ -17,12 +17,12 @@ third-party MCP clients, and the demo agent.
 
 ## Trust model — read this before deploying
 
-SpendLock is an **early-stage, single-operator tool**. Be honest with yourself
+Tollkeep is an **early-stage, single-operator tool**. Be honest with yourself
 about what it does and doesn't protect:
 
 - **The ledger is tamper-evident, not tamper-proof.** Rows are hash-chained and
   HMAC-signed, and `/api/ledger/verify` detects modification. But the operator
-  holds both the signing key (`.spendlock/secret.key`) and the database — the
+  holds both the signing key (`.tollkeep/secret.key`) and the database — the
   chain proves continuity, not independence. External anchoring (e.g. daily
   Merkle root elsewhere) is future work.
 - **Operator sessions and per-agent credentials, not a shared token.**
@@ -38,7 +38,7 @@ about what it does and doesn't protect:
 - **Approval links are single-use and expire** with their escalation, and raw
   tokens are stored only as sha256 — but anyone holding a minted link can decide
   it, so treat links as secrets while pending.
-- **SpendLock decides; it does not execute payments.** The `spend` tool
+- **Tollkeep decides; it does not execute payments.** The `spend` tool
   evaluates intent. It does not move money, verify supplier charges, or
   guarantee that a blocked intent wasn't attempted elsewhere. Rail names
   (`card`, `x402`, `ap2`, …) are labels for policy rules, not live integrations.
@@ -49,7 +49,7 @@ about what it does and doesn't protect:
    open internet.
 2. Protect operator sessions (don't sign in on shared machines) and treat agent
    credentials as secrets; revoke and re-issue from the console if one leaks.
-3. Back up `.spendlock/` — losing the signing key means the existing chain can
+3. Back up `.tollkeep/` — losing the signing key means the existing chain can
    no longer be extended-verified against new rows.
-4. Keep `SPENDLOCK_TELEGRAM_*` values in `.spendlock/env` (gitignored), never
+4. Keep `TOLLKEEP_TELEGRAM_*` values in `.tollkeep/env` (gitignored), never
    in committed files.

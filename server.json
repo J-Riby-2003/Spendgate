@@ -1,21 +1,21 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.JR03dev/spendlock",
-  "title": "SpendLock",
+  "name": "io.github.JR03dev/tollkeep",
+  "title": "Tollkeep",
   "description": "Policy and approval gate for AI agent spending — budgets, human approvals, signed audit ledger.",
   "version": "0.1.0",
   "repository": {
-    "url": "https://github.com/JR03dev/SpendLock",
+    "url": "https://github.com/JR03dev/Tollkeep",
     "source": "github"
   },
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://spendlock.fly.dev/mcp",
+      "url": "https://tollkeep.fly.dev/mcp",
       "headers": [
         {
           "name": "Authorization",
-          "description": "Bearer credential for your SpendLock agent (SG-... token)",
+          "description": "Bearer credential for your Tollkeep agent (SG-... token)",
           "isRequired": true,
           "isSecret": true
         }

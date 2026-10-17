@@ -3,8 +3,8 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 const env = vi.hoisted(() => {
-  process.env.SPENDLOCK_DATA = `/tmp/spendlock-test-notify-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return process.env.SPENDLOCK_DATA;
+  process.env.TOLLKEEP_DATA = `/tmp/tollkeep-test-notify-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return process.env.TOLLKEEP_DATA;
 });
 
 import { onEvent, submitSpend, decide } from '../src/core/engine.js';
@@ -50,7 +50,7 @@ describe('telegram push on escalation', () => {
     const body = JSON.parse(String(init.body));
     expect(body.chat_id).toBe('C');
     expect(body.parse_mode).toBe('HTML');
-    expect(body.text).toContain('<b>SpendLock approval needed</b>');
+    expect(body.text).toContain('<b>Tollkeep approval needed</b>');
     expect(body.text).toContain('acme');
     expect(body.text).toContain('£250.00');
     expect(body.text).toContain('notify-test');
@@ -126,17 +126,17 @@ describe('resolveNotifier', () => {
 
   it('returns null (with a warning) when only half-configured', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    expect(resolveNotifier({ SPENDLOCK_TELEGRAM_BOT_TOKEN: 'B' })).toBeNull();
-    expect(resolveNotifier({ SPENDLOCK_TELEGRAM_CHAT_ID: 'C' })).toBeNull();
+    expect(resolveNotifier({ TOLLKEEP_TELEGRAM_BOT_TOKEN: 'B' })).toBeNull();
+    expect(resolveNotifier({ TOLLKEEP_TELEGRAM_CHAT_ID: 'C' })).toBeNull();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
 
-  it('uses SPENDLOCK_PUBLIC_BASE_URL for link URLs', () => {
+  it('uses TOLLKEEP_PUBLIC_BASE_URL for link URLs', () => {
     const n = resolveNotifier({
-      SPENDLOCK_TELEGRAM_BOT_TOKEN: 'B',
-      SPENDLOCK_TELEGRAM_CHAT_ID: 'C',
-      SPENDLOCK_PUBLIC_BASE_URL: 'https://tunnel.example/',
+      TOLLKEEP_TELEGRAM_BOT_TOKEN: 'B',
+      TOLLKEEP_TELEGRAM_CHAT_ID: 'C',
+      TOLLKEEP_PUBLIC_BASE_URL: 'https://tunnel.example/',
     });
     expect(n?.name).toBe('telegram');
     // trailing slash stripped — links would otherwise get a double slash

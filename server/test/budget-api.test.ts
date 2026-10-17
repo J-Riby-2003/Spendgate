@@ -1,6 +1,6 @@
 import { beforeAll, afterAll, expect, it, vi } from 'vitest';
 import { once } from 'node:events';
-vi.hoisted(() => { process.env.SPENDLOCK_DATA = `/tmp/spendlock-budget-api-${Date.now()}-${Math.random()}`; });
+vi.hoisted(() => { process.env.TOLLKEEP_DATA = `/tmp/tollkeep-budget-api-${Date.now()}-${Math.random()}`; });
 import { createApplication } from '../src/app.js';
 import { provisionOperator, issueCredential } from '../src/auth.js';
 import { db, store } from '../src/core/store.js';
@@ -16,7 +16,7 @@ beforeAll(async () => {
   operatorId = (await provisionOperator('operator', 'test budget password 123')).operatorId;
   server = createApplication(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   base = `http://127.0.0.1:${(server.address() as any).port}`;
-  process.env.SPENDLOCK_PUBLIC_BASE_URL = base;
+  process.env.TOLLKEEP_PUBLIC_BASE_URL = base;
   const login = await request('/api/auth/login', 'POST', { username: 'operator', password: 'test budget password 123' }, false);
   cookie = login.headers.get('set-cookie')!.split(';')[0]; csrf = (await login.json()).csrfToken;
 });

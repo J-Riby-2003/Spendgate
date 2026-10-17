@@ -10,8 +10,8 @@ import { appendLedger } from './ledger.js';
 import { cleanStr } from './sanitize.js';
 
 export function approvalTimeout(env: NodeJS.ProcessEnv = process.env): number {
-  const value = Number(env.SPENDLOCK_APPROVAL_TIMEOUT_MS ?? 300000);
-  if (!Number.isSafeInteger(value) || value < 60000 || value > 604800000) throw new Error('SPENDLOCK_APPROVAL_TIMEOUT_MS must be an integer from 60000 to 604800000.');
+  const value = Number(env.TOLLKEEP_APPROVAL_TIMEOUT_MS ?? 300000);
+  if (!Number.isSafeInteger(value) || value < 60000 || value > 604800000) throw new Error('TOLLKEEP_APPROVAL_TIMEOUT_MS must be an integer from 60000 to 604800000.');
   return value;
 }
 export const APPROVAL_TIMEOUT_MS = approvalTimeout();

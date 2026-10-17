@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-vi.hoisted(() => { process.env.SPENDLOCK_DATA = `/tmp/spendlock-context-${Date.now()}-${Math.random()}`; });
+vi.hoisted(() => { process.env.TOLLKEEP_DATA = `/tmp/tollkeep-context-${Date.now()}-${Math.random()}`; });
 import { db, store, withImmediateTransaction } from '../src/core/store.js';
 import { submitRequest, finaliseApproval } from '../src/core/engine.js';
 import { budget } from '../src/core/budget-state.js';

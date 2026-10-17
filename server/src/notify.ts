@@ -65,7 +65,7 @@ export function telegramNotifier(opts: TelegramOpts): Notifier {
       const reject = links.find((l) => l.action === 'reject');
       if (!approve || !reject) throw new Error('decision link pair incomplete');
       const text = [
-        '⏳ <b>SpendLock approval needed</b>',
+        '⏳ <b>Tollkeep approval needed</b>',
         '',
         ...summaryLines(approval),
         '',
@@ -98,17 +98,17 @@ export function telegramNotifier(opts: TelegramOpts): Notifier {
 
 /** Build the notifier from the environment, or null when unconfigured. */
 export function resolveNotifier(env: NodeJS.ProcessEnv = process.env): Notifier | null {
-  const token = env.SPENDLOCK_TELEGRAM_BOT_TOKEN;
-  const chatId = env.SPENDLOCK_TELEGRAM_CHAT_ID;
+  const token = env.TOLLKEEP_TELEGRAM_BOT_TOKEN;
+  const chatId = env.TOLLKEEP_TELEGRAM_CHAT_ID;
   if (!token && !chatId) return null;
   if (!token || !chatId) {
-    console.warn('[notify] SPENDLOCK_TELEGRAM_BOT_TOKEN and SPENDLOCK_TELEGRAM_CHAT_ID must both be set — push approvals disabled.');
+    console.warn('[notify] TOLLKEEP_TELEGRAM_BOT_TOKEN and TOLLKEEP_TELEGRAM_CHAT_ID must both be set — push approvals disabled.');
     return null;
   }
   return telegramNotifier({
     botToken: token,
     chatId,
-    baseUrl: (env.SPENDLOCK_PUBLIC_BASE_URL ?? `http://localhost:${env.SPENDLOCK_PORT ?? 8787}`).replace(/\/$/, ''),
+    baseUrl: (env.TOLLKEEP_PUBLIC_BASE_URL ?? `http://localhost:${env.TOLLKEEP_PORT ?? 8787}`).replace(/\/$/, ''),
   });
 }
 
