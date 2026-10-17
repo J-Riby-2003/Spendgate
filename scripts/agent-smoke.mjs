@@ -1,4 +1,4 @@
-// Real-agent smoke test: connects to SpendGate over the MCP protocol
+// Real-agent smoke test: connects to SpendLock over the MCP protocol
 // (Streamable HTTP, exactly like Claude Code / any MCP client would) and
 // drives every tool the way an autonomous agent would.
 //
@@ -151,5 +151,5 @@ report(
 );
 
 for (const connection of clients.values()) await connection.close();
-console.log(failures === 0 ? '\nAll checks passed — SpendGate works over real MCP.' : `\n${failures} check(s) FAILED`);
+console.log(failures === 0 ? '\nAll checks passed — SpendLock works over real MCP.' : `\n${failures} check(s) FAILED`);
 process.exit(failures === 0 ? 0 : 1);

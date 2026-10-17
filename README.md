@@ -1,13 +1,13 @@
-# SpendGate
+# SpendLock
 
 **The policy and approval layer above every agent payment rail.**
 A Britannic & Balkan project.
 
-> **Status: v0.1, pre-payment-execution.** SpendGate decides and records; it does
+> **Status: v0.1, pre-payment-execution.** SpendLock decides and records; it does
 > not yet move money or verify supplier charges. See [SECURITY.md](SECURITY.md)
 > for the trust model.
 
-Agents route payment intents through the SpendGate MCP server. Policy decides:
+Agents route payment intents through the SpendLock MCP server. Policy decides:
 auto-allow, hard-deny, or escalate to a human. Every intent — allowed or not —
 lands in a SHA-256 hash-chained, HMAC-signed audit ledger.
 

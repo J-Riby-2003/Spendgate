@@ -1,4 +1,4 @@
-// Demo agent: drives the SpendGate MCP server through every decision path.
+// Demo agent: drives the SpendLock MCP server through every decision path.
 // Run with: npm run demo   (server must be running — `npm run dev -w server`)
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';

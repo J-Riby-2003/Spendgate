@@ -65,7 +65,7 @@ export function telegramNotifier(opts: TelegramOpts): Notifier {
       const reject = links.find((l) => l.action === 'reject');
       if (!approve || !reject) throw new Error('decision link pair incomplete');
       const text = [
-        '⏳ <b>SpendGate approval needed</b>',
+        '⏳ <b>SpendLock approval needed</b>',
         '',
         ...summaryLines(approval),
         '',

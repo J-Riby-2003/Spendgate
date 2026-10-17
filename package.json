@@ -2,7 +2,7 @@
   "name": "spendgate",
   "version": "0.1.0",
   "private": true,
-  "description": "SpendGate — the policy and approval layer above every agent payment rail",
+  "description": "SpendLock — the policy and approval layer above every agent payment rail",
   "type": "module",
   "workspaces": [
     "server",

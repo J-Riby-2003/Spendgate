@@ -1,4 +1,4 @@
-// SpendGate server: REST console API + WebSocket live feed + MCP (Streamable HTTP).
+// SpendLock server: REST console API + WebSocket live feed + MCP (Streamable HTTP).
 import './config.js'; // loads .spendgate/env — must run before any env reads
 import express from 'express';
 import { createServer } from 'node:http';

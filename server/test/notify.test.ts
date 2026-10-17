@@ -50,7 +50,7 @@ describe('telegram push on escalation', () => {
     const body = JSON.parse(String(init.body));
     expect(body.chat_id).toBe('C');
     expect(body.parse_mode).toBe('HTML');
-    expect(body.text).toContain('<b>SpendGate approval needed</b>');
+    expect(body.text).toContain('<b>SpendLock approval needed</b>');
     expect(body.text).toContain('acme');
     expect(body.text).toContain('£250.00');
     expect(body.text).toContain('notify-test');

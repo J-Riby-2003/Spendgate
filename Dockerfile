@@ -1,4 +1,4 @@
-# Build the web client and run the SpendGate server as one image.
+# Build the web client and run the SpendLock server as one image.
 FROM node:24-slim
 WORKDIR /app
 

@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Email **support@britannicbalkan.com** with the subject `SpendGate security`.
+Email **support@britannicbalkan.com** with the subject `SpendLock security`.
 Please include: affected version/commit, reproduction steps, and impact. You'll
 get an acknowledgement within 48 hours. Please don't open a public issue for
 unfixed vulnerabilities.
@@ -17,7 +17,7 @@ third-party MCP clients, and the demo agent.
 
 ## Trust model — read this before deploying
 
-SpendGate is an **early-stage, single-operator tool**. Be honest with yourself
+SpendLock is an **early-stage, single-operator tool**. Be honest with yourself
 about what it does and doesn't protect:
 
 - **The ledger is tamper-evident, not tamper-proof.** Rows are hash-chained and
@@ -38,7 +38,7 @@ about what it does and doesn't protect:
 - **Approval links are single-use and expire** with their escalation, and raw
   tokens are stored only as sha256 — but anyone holding a minted link can decide
   it, so treat links as secrets while pending.
-- **SpendGate decides; it does not execute payments.** The `spend` tool
+- **SpendLock decides; it does not execute payments.** The `spend` tool
   evaluates intent. It does not move money, verify supplier charges, or
   guarantee that a blocked intent wasn't attempted elsewhere. Rail names
   (`card`, `x402`, `ap2`, …) are labels for policy rules, not live integrations.

@@ -5,5 +5,5 @@ if (process.env.NODE_ENV === 'production' && !process.env.SPENDGATE_PUBLIC_BASE_
   throw new Error('Production requires SPENDGATE_PUBLIC_BASE_URL with an HTTPS origin');
 }
 createApplication().listen(port, () => {
-  console.log(`SpendGate server on port ${port}; operator sessions and scoped agent credentials required.`);
+  console.log(`SpendLock server on port ${port}; operator sessions and scoped agent credentials required.`);
 });

@@ -181,7 +181,7 @@ export default function App() {
             {page === 'ledger' && <Ledger state={state} />}
           </>
         ) : (
-          <p className="font-mono text-sm text-paper mt-10">Connecting to SpendGate server…</p>
+          <p className="font-mono text-sm text-paper mt-10">Connecting to SpendLock server…</p>
         )}
       </main>
       </div>

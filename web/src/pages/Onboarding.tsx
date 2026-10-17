@@ -98,8 +98,8 @@ export default function Onboarding() {
     catch { setNotice('Clipboard unavailable. Select and copy the text.'); }
   }
   const configuration = JSON.stringify({ mcpServers: { spendgate: { type: 'http', url: `${location.origin}/mcp`, headers: { Authorization: 'Bearer ${SPENDGATE_AGENT_TOKEN}' } } } }, null, 2);
-  const prompt = challenge ? `Use SpendGate connection_check with ${JSON.stringify({ challenge: challenge.challenge })}. This is a connection check only; do not call spend.` : '';
-  const testPrompt = journey ? `Use SpendGate onboarding_test with ${JSON.stringify({ onboardingId: journey.id, sample: { amount: toMinor(amount, currency), currency, vendor, purpose, rail: 'mcp' } })}. This is simulation only; do not call spend.` : '';
+  const prompt = challenge ? `Use SpendLock connection_check with ${JSON.stringify({ challenge: challenge.challenge })}. This is a connection check only; do not call spend.` : '';
+  const testPrompt = journey ? `Use SpendLock onboarding_test with ${JSON.stringify({ onboardingId: journey.id, sample: { amount: toMinor(amount, currency), currency, vendor, purpose, rail: 'mcp' } })}. This is simulation only; do not call spend.` : '';
 
   return <div>
     <PageHeader title="Set up an agent" sub="" />

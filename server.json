@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.JR03dev/spendgate",
-  "title": "SpendGate",
+  "name": "io.github.JR03dev/spendlock",
+  "title": "SpendLock",
   "description": "Policy and approval gate for AI agent spending — budgets, human approvals, signed audit ledger.",
   "version": "0.1.0",
   "repository": {
@@ -15,7 +15,7 @@
       "headers": [
         {
           "name": "Authorization",
-          "description": "Bearer credential for your SpendGate agent (SG-... token)",
+          "description": "Bearer credential for your SpendLock agent (SG-... token)",
           "isRequired": true,
           "isSecret": true
         }

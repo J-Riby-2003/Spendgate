@@ -1,4 +1,4 @@
-// Shared domain types for SpendGate core.
+// Shared domain types for SpendLock core.
 
 export type Rail = 'x402' | 'mpp' | 'ap2' | 'acp' | 'card' | 'stablecoin' | 'mcp';
 

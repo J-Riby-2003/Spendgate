@@ -1,4 +1,4 @@
-// Input guards shared by every SpendGate surface (REST + MCP).
+// Input guards shared by every SpendLock surface (REST + MCP).
 // Rules: no NUL/control characters, trimmed, length-capped,
 // and money is always a bounded non-negative integer in minor units.
 
