@@ -1,5 +1,5 @@
 {
   "mcpServers": {
-    "spendgate": { "url": "http://localhost:8787/mcp" }
+    "spendlock": { "url": "http://localhost:8787/mcp" }
   }
 }

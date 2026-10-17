@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 let dir: string;
-beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'spendgate-process-')); });
+beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'spendlock-process-')); });
 const workers = new Set<ReturnType<typeof processWorker>>();
 afterEach(async () => {
   await Promise.all([...workers].map(worker => worker.stop()));
@@ -14,7 +14,7 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 function worker() {
-  const child = processWorker(['--import', 'tsx', 'test/fixtures/durable-worker.ts'], { ...process.env, SPENDGATE_DATA: dir });
+  const child = processWorker(['--import', 'tsx', 'test/fixtures/durable-worker.ts'], { ...process.env, SPENDLOCK_DATA: dir });
   workers.add(child);
   return child;
 }
@@ -45,7 +45,7 @@ it('serialises independent approve/reject writers into exactly one outcome', asy
 it('expires overdue work after process restart and reclaims an interrupted notification lease safely', async () => {
   const stale = (await run({ action: 'submit', key: 'stale' })).result;
   const live = (await run({ action: 'submit', key: 'live-notify' })).result;
-  const db = new DatabaseSync(join(dir, 'spendgate.db'));
+  const db = new DatabaseSync(join(dir, 'spendlock.db'));
   db.prepare('UPDATE approvals SET expires_at=? WHERE id=?').run(new Date(Date.now() - 1).toISOString(), stale.approvalId);
   db.prepare("UPDATE notification_outbox SET status='sending',lease_id='dead-process',lease_until=0 WHERE approval_id=?").run(live.approvalId);
   db.close();
@@ -61,14 +61,14 @@ it('concurrent retries in separate processes create one durable request and one 
   const left = worker(), right = worker(); await Promise.all([left.ready, right.ready]);
   const results = await Promise.all([left.run({ action: 'submit', key: 'concurrent-duplicate' }), right.run({ action: 'submit', key: 'concurrent-duplicate' })]);
   expect(results[0].result).toEqual(results[1].result);
-  const db = new DatabaseSync(join(dir, 'spendgate.db'));
+  const db = new DatabaseSync(join(dir, 'spendlock.db'));
   expect(db.prepare('SELECT COUNT(*) AS n FROM notification_outbox WHERE approval_id=?').get(results[0].result.approvalId)?.n).toBe(1);
   db.close();
 }, 15000);
 it('competing approval and expiry processes cannot approve overdue work or append twice', async () => {
   const pending = (await run({ action: 'submit', key: 'expiry-race' })).result;
   const approve = worker(), expire = worker(); await Promise.all([approve.ready, expire.ready]);
-  const db = new DatabaseSync(join(dir, 'spendgate.db'));
+  const db = new DatabaseSync(join(dir, 'spendlock.db'));
   db.prepare('UPDATE approvals SET expires_at=? WHERE id=?').run(new Date(Date.now() - 1).toISOString(), pending.approvalId); db.close();
   const [decision] = await Promise.all([approve.run({ action: 'decide', approvalId: pending.approvalId, approve: true }), expire.run({ action: 'expire' })]);
   expect(decision.result).toBe(false);
@@ -78,7 +78,7 @@ it('competing approval and expiry processes cannot approve overdue work or appen
 }, 15000);
 
 it('recovers the exact pending request after an ungraceful SIGKILL', async () => {
-  const child = spawn(process.execPath, ['--import', 'tsx', 'test/fixtures/durable-worker.ts'], { env: { ...process.env, SPENDGATE_DATA: dir }, stdio: ['pipe','pipe','pipe'] });
+  const child = spawn(process.execPath, ['--import', 'tsx', 'test/fixtures/durable-worker.ts'], { env: { ...process.env, SPENDLOCK_DATA: dir }, stdio: ['pipe','pipe','pipe'] });
   let output = '';
   child.stdout.on('data', chunk => { output += String(chunk); });
   child.stderr.resume();

@@ -5,7 +5,7 @@ import type { ApprovalRequest } from './types.js';
 import type { ApprovalDecisionContext, ApprovalBudgetPreview, VendorHistory } from '../../../shared/approval-context.js';
 
 // SQLite lower() handles ASCII only; use the same Unicode case mapping as the policy inputs.
-db.function('spendgate_vendor_key', { deterministic: true }, (value: unknown) => String(value).toLowerCase());
+db.function('spendlock_vendor_key', { deterministic: true }, (value: unknown) => String(value).toLowerCase());
 
 export type ContextualApproval = ApprovalRequest & { requestId: string; context: ApprovalDecisionContext };
 
@@ -18,7 +18,7 @@ function readSnapshot<T>(read: () => T): T {
 function vendorHistory(a: ApprovalRequest): VendorHistory {
   try {
     const rows = db.prepare(`SELECT intent_id, ts, amount, currency, decision FROM ledger
-      WHERE agent_id=? AND spendgate_vendor_key(vendor)=spendgate_vendor_key(?) AND intent_id!=? ORDER BY seq DESC LIMIT 6`)
+      WHERE agent_id=? AND spendlock_vendor_key(vendor)=spendlock_vendor_key(?) AND intent_id!=? ORDER BY seq DESC LIMIT 6`)
       .all(a.intent.agentId, a.intent.vendor, a.intent.id);
     // Preserve the evaluator's existing known-vendor definition: a prior permission, not payment.
     const known = [...store.knownVendors(a.intent.agentId)].some(v => v.toLowerCase() === a.intent.vendor.toLowerCase());

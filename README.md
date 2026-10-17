@@ -47,18 +47,18 @@ Unit tests run against a throwaway data dir; e2e starts a separate server on :18
 - **Default-deny posture**: unknown agent → rejected; no policy → rejected; ambiguous → human.
 - **Budget modes are explicit** — blocked vendors and hard-stop budget overruns deny. Approval-override permits an authenticated operator to exceed available funds with a recorded reason; other ambiguous policy rules escalate.
 - **SQLite via `node:sqlite`** — zero native dependencies, one less thing to break.
-- Signing key lives in `.spendgate/secret.key` (mode 0600), outside the database.
+- Signing key lives in `.spendlock/secret.key` (mode 0600), outside the database.
 
 ## Connect a real agent
 
-For guided setup, sign in and choose **Set up an agent**. It creates the initial policy, delivers a scoped credential once, verifies a real MCP client connection and demonstrates decisions in safe simulation mode. Setup resumes after interruption; lost secrets require explicit rotation. Set `SPENDGATE_SEED_DEMO=false` for an empty deployment. See [agent onboarding](docs/agent-onboarding.md) for the journey, recovery and API contracts.
+For guided setup, sign in and choose **Set up an agent**. It creates the initial policy, delivers a scoped credential once, verifies a real MCP client connection and demonstrates decisions in safe simulation mode. Setup resumes after interruption; lost secrets require explicit rotation. Set `SPENDLOCK_SEED_DEMO=false` for an empty deployment. See [agent onboarding](docs/agent-onboarding.md) for the journey, recovery and API contracts.
 
 Any MCP client (Claude Code, Claude Desktop, your own):
 
 ```json
 {
   "mcpServers": {
-    "spendgate": {
+    "spendlock": {
       "url": "http://localhost:8787/mcp",
       "headers": { "Authorization": "Bearer <agent-credential>" }
     }
@@ -84,15 +84,15 @@ Every new escalation arrives on your phone with Approve/Reject buttons — no co
 
 1. Telegram → **@BotFather** → `/newbot` → copy the token.
 2. Text your new bot anything, then open `https://api.telegram.org/bot<token>/getUpdates` and copy your `chat.id`.
-3. Put both in `.spendgate/env` (auto-loaded by the server, already gitignored):
+3. Put both in `.spendlock/env` (auto-loaded by the server, already gitignored):
 
 ```
-SPENDGATE_TELEGRAM_BOT_TOKEN=123:abc
-SPENDGATE_TELEGRAM_CHAT_ID=456
-SPENDGATE_PUBLIC_BASE_URL=https://your-tunnel.example
+SPENDLOCK_TELEGRAM_BOT_TOKEN=123:abc
+SPENDLOCK_TELEGRAM_CHAT_ID=456
+SPENDLOCK_PUBLIC_BASE_URL=https://your-tunnel.example
 ```
 
-`SPENDGATE_PUBLIC_BASE_URL` only matters off-LAN — it's the origin baked into the phone link buttons. Restart the server; the startup banner confirms `Notifications: telegram push approvals`.
+`SPENDLOCK_PUBLIC_BASE_URL` only matters off-LAN — it's the origin baked into the phone link buttons. Restart the server; the startup banner confirms `Notifications: telegram push approvals`.
 
 
 Then the agent calls `spend(agent, amount, currency, vendor, purpose, rail)` —

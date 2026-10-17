@@ -1,5 +1,5 @@
 {
-  "name": "spendgate",
+  "name": "spendlock",
   "version": "0.1.0",
   "private": true,
   "description": "SpendLock — the policy and approval layer above every agent payment rail",

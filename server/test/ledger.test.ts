@@ -2,11 +2,11 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 // MUST run before the static imports below pull in store.ts — vitest hoists
-// this above every import, so the real .spendgate dir is never touched.
+// this above every import, so the real .spendlock dir is never touched.
 // (store.ts mkdirs the path itself; no fs import needed inside the hoisted block)
 const env = vi.hoisted(() => {
-  process.env.SPENDGATE_DATA = `/tmp/spendgate-test-ledger-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return process.env.SPENDGATE_DATA;
+  process.env.SPENDLOCK_DATA = `/tmp/spendlock-test-ledger-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return process.env.SPENDLOCK_DATA;
 });
 
 import type { LedgerEntry, SpendIntent } from '../src/core/types.js';

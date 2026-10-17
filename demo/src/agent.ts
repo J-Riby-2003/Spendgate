@@ -3,14 +3,14 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-const BASE = process.env.SPENDGATE_URL ?? 'http://localhost:8787';
-const credentials: Record<string, string> = JSON.parse(process.env.SPENDGATE_AGENT_CREDENTIALS ?? '{}');
+const BASE = process.env.SPENDLOCK_URL ?? 'http://localhost:8787';
+const credentials: Record<string, string> = JSON.parse(process.env.SPENDLOCK_AGENT_CREDENTIALS ?? '{}');
 const clients = new Map<string, Client>();
 async function clientFor(agentId: string): Promise<Client> {
   const existing = clients.get(agentId);
   if (existing) return existing;
   const credential = credentials[agentId];
-  if (!credential) throw new Error(`Issue a scoped credential for ${agentId} and set SPENDGATE_AGENT_CREDENTIALS. See docs/access-and-migration.md.`);
+  if (!credential) throw new Error(`Issue a scoped credential for ${agentId} and set SPENDLOCK_AGENT_CREDENTIALS. See docs/access-and-migration.md.`);
   const client = new Client({ name: 'demo-agent', version: '0.1.0' });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${credential}` } } }));
   clients.set(agentId, client);

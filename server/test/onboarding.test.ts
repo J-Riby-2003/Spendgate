@@ -5,8 +5,8 @@ import { spawn } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 vi.hoisted(() => {
-  process.env.SPENDGATE_DATA = `/tmp/spendgate-onboarding-${Date.now()}-${Math.random()}`;
-  process.env.SPENDGATE_SEED_DEMO = 'false';
+  process.env.SPENDLOCK_DATA = `/tmp/spendlock-onboarding-${Date.now()}-${Math.random()}`;
+  process.env.SPENDLOCK_SEED_DEMO = 'false';
 });
 import { createApplication } from '../src/app.js';
 import { db, store } from '../src/core/store.js';
@@ -20,7 +20,7 @@ async function request(path: string, method = 'GET', body?: unknown, auth = true
 }
 async function startServer() {
   server = createApplication(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
-  base = `http://127.0.0.1:${(server.address() as any).port}`; process.env.SPENDGATE_PUBLIC_BASE_URL = base;
+  base = `http://127.0.0.1:${(server.address() as any).port}`; process.env.SPENDLOCK_PUBLIC_BASE_URL = base;
 }
 async function mcp(secret: string, tool: string, args: Record<string, unknown>) {
   const client = new Client({ name: 'onboarding-test', version: '1' });

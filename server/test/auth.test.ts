@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-await vi.hoisted(async () => { process.env.SPENDGATE_DATA = `/tmp/spendgate-auth-${Date.now()}-${Math.random()}`; (await import('node:fs')).mkdirSync(process.env.SPENDGATE_DATA, { recursive: true }); });
+await vi.hoisted(async () => { process.env.SPENDLOCK_DATA = `/tmp/spendlock-auth-${Date.now()}-${Math.random()}`; (await import('node:fs')).mkdirSync(process.env.SPENDLOCK_DATA, { recursive: true }); });
 import * as auth from '../src/auth.js';
 import { db, store } from '../src/core/store.js';
 import { appendLedger, verifyLedger } from '../src/core/ledger.js';

@@ -1,4 +1,4 @@
-app = 'spendgate'
+app = 'spendlock'
 primary_region = 'lhr'
 kill_signal = 'SIGINT'
 kill_timeout = 5
@@ -7,13 +7,13 @@ kill_timeout = 5
 
 # SQLite data + generated console token persist across deploys.
 [[mounts]]
-  source = 'spendgate_data'
+  source = 'spendlock_data'
   destination = '/data'
   initial_size = '1gb'
 
 [env]
-  SPENDGATE_PORT = '8787'
-  SPENDGATE_DATA = '/data'
+  SPENDLOCK_PORT = '8787'
+  SPENDLOCK_DATA = '/data'
 
 [http_service]
   internal_port = 8787

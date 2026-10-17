@@ -16,7 +16,7 @@ The existing credential creation/rotation endpoints accept an optional `onboardi
 
 Only the first successful creation/rotation response contains a secret. Repeating creation returns the original credential ID with `secret: null`. Repeating rotation with the same original credential ID returns the same replacement metadata with `secret: null`; it never rotates that replacement implicitly. The UI preserves the original ID when retrying an action whose response was lost. A later, explicitly confirmed recovery action can rotate the current credential again. An explicitly confirmed onboarding rotation can also replace its revoked credential, provided the original agent generation still exists.
 
-Raw secrets exist only in the creation/rotation response and current component memory. They are not stored in onboarding rows, browser storage, configuration snippets or logs. Leaving the credential step clears the in-memory secret. The operator saves it in their private agent secret manager and loads `SPENDGATE_AGENT_TOKEN` into the environment that launches Claude Code. The copyable `.mcp.json` references that variable in the Authorization header, with `type: http` and the console origin's `/mcp` URL. Merge it with existing configuration rather than replacing other servers. See [Claude Code's MCP documentation](https://code.claude.com/docs/en/mcp#environment-variable-expansion-in-mcp-json).
+Raw secrets exist only in the creation/rotation response and current component memory. They are not stored in onboarding rows, browser storage, configuration snippets or logs. Leaving the credential step clears the in-memory secret. The operator saves it in their private agent secret manager and loads `SPENDLOCK_AGENT_TOKEN` into the environment that launches Claude Code. The copyable `.mcp.json` references that variable in the Authorization header, with `type: http` and the console origin's `/mcp` URL. Merge it with existing configuration rather than replacing other servers. See [Claude Code's MCP documentation](https://code.claude.com/docs/en/mcp#environment-variable-expansion-in-mcp-json).
 
 ## Actual MCP connection check
 
@@ -51,7 +51,7 @@ All console routes below use the existing operator session/Origin/CSRF protectio
 
 Immutable migration `issue05_001_onboarding` adds only onboarding_sessions and onboarding_challenges plus their indexes. It uses #1's migration runner and #1/#3/#6 transactions; old agents, policies, credentials, approvals, reservations, evidence and signed ledger rows are untouched. Existing deployments are not forced into onboarding. Back up stopped SQLite and secret.key before upgrading as described in access-and-migration.md.
 
-Set `SPENDGATE_SEED_DEMO=false` to start a genuinely empty deployment. Omission retains existing demo seeding for compatibility; it does not remove existing demo agents. Operator provisioning remains the existing first setup step.
+Set `SPENDLOCK_SEED_DEMO=false` to start a genuinely empty deployment. Omission retains existing demo seeding for compatibility; it does not remove existing demo agents. Operator provisioning remains the existing first setup step.
 
 ## Verification and integration
 

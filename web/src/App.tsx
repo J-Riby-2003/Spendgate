@@ -76,7 +76,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center px-4">
         <div className="w-full max-w-sm">
-          <p className="font-wordmark text-2xl font-semibold tracking-[0.04em] text-paper">SPENDGATE</p>
+          <p className="font-wordmark text-2xl font-semibold tracking-[0.04em] text-paper">SPENDLOCK</p>
           <p className="font-mono text-[13px] tracking-[0.04em] text-paper mt-2">
             Sign in to manage agents, policies and approvals.
           </p>
@@ -107,7 +107,7 @@ export default function App() {
     <div className="min-h-screen bg-black">
       {/* mobile top bar */}
       <div className="lg:hidden sticky top-0 z-40 bg-bg border-b border-line flex items-center justify-between px-4 h-14">
-        <p className="font-wordmark text-[17px] font-semibold tracking-[0.04em] text-paper">SPENDGATE</p>
+        <p className="font-wordmark text-[17px] font-semibold tracking-[0.04em] text-paper">SPENDLOCK</p>
         <button onClick={() => setMenuOpen(true)} aria-label="Open menu" className="p-2 -mr-2 text-paper">
           <svg viewBox="0 0 20 20" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
             <path d="M3 5h14M3 10h14M3 15h14" />
@@ -124,7 +124,7 @@ export default function App() {
       {/* sidebar */}
       <aside className={`fixed lg:sticky inset-y-0 left-0 z-50 w-52 shrink-0 border-r border-line flex flex-col bg-bg h-screen transition-transform duration-200 ${menuOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0`}>
         <div className="px-5 pt-6 pb-5 border-b border-line flex items-center justify-between">
-          <p className="font-wordmark text-[17px] font-semibold tracking-[0.04em] text-paper">SPENDGATE</p>
+          <p className="font-wordmark text-[17px] font-semibold tracking-[0.04em] text-paper">SPENDLOCK</p>
           <button onClick={() => setMenuOpen(false)} aria-label="Close menu" className="lg:hidden p-1 text-paper/70 hover:text-white">
             <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
               <path d="M4 4l8 8M12 4l-8 8" />

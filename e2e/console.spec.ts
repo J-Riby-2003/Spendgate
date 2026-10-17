@@ -29,7 +29,7 @@ test('agent escalation is approved by a human in the console', async ({ page }) 
 
   // an agent spends over its human-approval threshold over real MCP —
   // the call blocks until a human decides, exactly as in production
-  const client = new Client({ name: 'spendgate-e2e-agent', version: '0.1.0' });
+  const client = new Client({ name: 'spendlock-e2e-agent', version: '0.1.0' });
   const transport = new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), {
     requestInit: { headers: await agentHeaders('procurement-02') },
   });

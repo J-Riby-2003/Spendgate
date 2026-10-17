@@ -10,14 +10,15 @@ COPY demo/package.json demo/
 RUN npm ci
 
 # Build the web client, then bring in the server source.
+# shared/ typechecks against server/ sources, so server must exist at build time.
 COPY shared shared
+COPY server server
 COPY web web
 RUN npm run build -w web
-COPY server server
 
 ENV NODE_ENV=production \
-    SPENDGATE_PORT=8787 \
-    SPENDGATE_DATA=/data
+    SPENDLOCK_PORT=8787 \
+    SPENDLOCK_DATA=/data
 EXPOSE 8787
 
 CMD ["npm", "run", "start", "-w", "server"]

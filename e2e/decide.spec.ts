@@ -8,7 +8,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 test('decision link approves an escalation from the phone page', async ({ page }) => {
   // an agent spends over its ceiling — the call blocks until a human decides
-  const client = new Client({ name: 'spendgate-e2e-phone', version: '0.1.0' });
+  const client = new Client({ name: 'spendlock-e2e-phone', version: '0.1.0' });
   const transport = new StreamableHTTPClientTransport(new URL(`${BASE}/mcp`), {
     requestInit: { headers: await agentHeaders('procurement-02') },
   });

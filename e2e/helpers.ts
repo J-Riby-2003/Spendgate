@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-export const BASE = `http://127.0.0.1:${process.env.SPENDGATE_E2E_PORT ?? 18871}`;
+export const BASE = `http://127.0.0.1:${process.env.SPENDLOCK_E2E_PORT ?? 18871}`;
 export async function operatorHeaders() {
   const res = await fetch(`${BASE}/api/auth/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: BASE }, body: JSON.stringify({ username: 'test-operator', password: 'isolated test operator password' }) });
   expect(res.status).toBe(200);

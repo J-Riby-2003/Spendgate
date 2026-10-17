@@ -5,8 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 vi.hoisted(() => {
-  process.env.SPENDGATE_DATA = `/tmp/spendgate-adoption-integration-${Date.now()}-${Math.random()}`;
-  process.env.SPENDGATE_SEED_DEMO = 'false';
+  process.env.SPENDLOCK_DATA = `/tmp/spendlock-adoption-integration-${Date.now()}-${Math.random()}`;
+  process.env.SPENDLOCK_SEED_DEMO = 'false';
 });
 import { createApplication } from '../src/app.js';
 import { provisionOperator } from '../src/auth.js';
@@ -19,7 +19,7 @@ async function request(path: string, method = 'GET', body?: unknown) {
 beforeAll(async () => {
   operatorId = (await provisionOperator('integration-operator', 'isolated integration password')).operatorId;
   server = createApplication(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
-  base = `http://127.0.0.1:${(server.address() as any).port}`; process.env.SPENDGATE_PUBLIC_BASE_URL = base;
+  base = `http://127.0.0.1:${(server.address() as any).port}`; process.env.SPENDLOCK_PUBLIC_BASE_URL = base;
   const login = await fetch(base + '/api/auth/login', { method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'integration-operator', password: 'isolated integration password' }) });
   expect(login.status).toBe(200);
   headers = { Origin: base, 'Content-Type': 'application/json', Cookie: login.headers.get('set-cookie')!.split(';')[0], 'X-CSRF-Token': (await login.json()).csrfToken };

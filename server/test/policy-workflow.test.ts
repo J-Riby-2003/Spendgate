@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from 'vitest';
-vi.hoisted(() => { process.env.SPENDGATE_DATA = `/tmp/spendgate-policy-workflow-${Date.now()}-${Math.random()}`; });
+vi.hoisted(() => { process.env.SPENDLOCK_DATA = `/tmp/spendlock-policy-workflow-${Date.now()}-${Math.random()}`; });
 import { db, store, withImmediateTransaction } from '../src/core/store.js';
 import { submitRequest, decide, getRequest } from '../src/core/engine.js';
 import { evaluate } from '../src/core/policy.js';

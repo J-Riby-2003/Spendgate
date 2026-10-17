@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, it, vi } from 'vitest';
-vi.hoisted(() => { process.env.SPENDGATE_DATA = `/tmp/spendgate-access-${Date.now()}-${Math.random()}`; });
+vi.hoisted(() => { process.env.SPENDLOCK_DATA = `/tmp/spendlock-access-${Date.now()}-${Math.random()}`; });
 import { createApplication } from '../src/app.js';
 import { provisionOperator, issueCredential, revokeCredential, login, logout } from '../src/auth.js';
 import { db, store } from '../src/core/store.js';
@@ -26,7 +26,7 @@ beforeAll(async () => {
   operatorId = (await provisionOperator('operator', password)).operatorId;
   server = createApplication(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
   base = `http://127.0.0.1:${(server.address() as any).port}`;
-  process.env.SPENDGATE_PUBLIC_BASE_URL = base;
+  process.env.SPENDLOCK_PUBLIC_BASE_URL = base;
   for (const agentId of ['alpha', 'beta']) {
     store.upsertAgent(agentId, agentId, 'GBP');
     store.upsertPolicy({ agentId, maxPerTxn: 1000, dailyBudget: 10000, budgetMode: 'hard-stop', approvalThreshold: 2000, allowedVendors: '*', blockedVendors: [], newVendorRequiresApproval: false, allowedDays: '*', allowedWindow: null });

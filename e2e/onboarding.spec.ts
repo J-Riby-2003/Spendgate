@@ -9,12 +9,12 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 let child: ChildProcess, base: string, data: string;
 test.beforeEach(async () => {
-  data = mkdtempSync(join(tmpdir(), 'spendgate-onboarding-browser-'));
+  data = mkdtempSync(join(tmpdir(), 'spendlock-onboarding-browser-'));
   const probe = createServer(); await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve));
   const port = (probe.address() as { port: number }).port; await new Promise<void>(resolve => probe.close(() => resolve()));
   base = `http://127.0.0.1:${port}`;
-  const env = { ...process.env, SPENDGATE_DATA: data, SPENDGATE_PORT: String(port), SPENDGATE_PUBLIC_BASE_URL: base,
-    SPENDGATE_SEED_DEMO: 'false', SPENDGATE_TELEGRAM_BOT_TOKEN: '', SPENDGATE_TELEGRAM_CHAT_ID: '', NODE_ENV: 'test' };
+  const env = { ...process.env, SPENDLOCK_DATA: data, SPENDLOCK_PORT: String(port), SPENDLOCK_PUBLIC_BASE_URL: base,
+    SPENDLOCK_SEED_DEMO: 'false', SPENDLOCK_TELEGRAM_BOT_TOKEN: '', SPENDLOCK_TELEGRAM_CHAT_ID: '', NODE_ENV: 'test' };
   execFileSync(process.execPath, ['--import', 'tsx', 'server/src/provision-operator.ts', 'test-operator'], { env, input: 'isolated test operator password\n', stdio: ['pipe','pipe','pipe'] });
   child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], { cwd: join(process.cwd(), 'server'), env, stdio: 'pipe' });
   await expect.poll(async () => { try { return (await fetch(base + '/healthz')).status; } catch { return 0; } }).toBe(200);
@@ -48,7 +48,7 @@ test('clean account guides creation, failed connection retry, safe tests and com
   const secret = await page.getByLabel('New agent credential', { exact: true }).inputValue();
   expect(secret).toHaveLength(43);
   await page.getByRole('button', { name: 'I have saved the credential' }).click();
-  await expect(page.getByLabel('Claude Code configuration')).toContainText('${SPENDGATE_AGENT_TOKEN}');
+  await expect(page.getByLabel('Claude Code configuration')).toContainText('${SPENDLOCK_AGENT_TOKEN}');
   await page.getByRole('button', { name: 'Get connection challenge' }).click();
   await page.getByRole('button', { name: 'Check connection status' }).click();
   await expect(page.getByRole('alert')).toContainText('No MCP client has verified');
@@ -62,7 +62,7 @@ test('clean account guides creation, failed connection retry, safe tests and com
   await expect(page.getByText('Illustrative allow policy', { exact: true })).toBeVisible();
   await expect(page.getByText('Illustrative approval policy', { exact: true })).toBeVisible();
   await expect(page.getByText('Illustrative denial policy', { exact: true })).toBeVisible();
-  await page.screenshot({ path: '/tmp/spendgate-onboarding-safe-tests.png', fullPage: true });
+  await page.screenshot({ path: '/tmp/spendlock-onboarding-safe-tests.png', fullPage: true });
   await page.reload();
   await page.getByRole('button', { name: 'Set up an agent', exact: true }).click();
   await expect(page.getByText('Safe tests completed', { exact: true })).toBeVisible();

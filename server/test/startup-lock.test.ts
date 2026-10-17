@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, it } from 'vitest';
 it('waits for an existing DELETE-mode writer before enabling WAL and migrating', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'spendgate-startup-lock-'));
-  const db = new DatabaseSync(join(dir, 'spendgate.db'));
+  const dir = mkdtempSync(join(tmpdir(), 'spendlock-startup-lock-'));
+  const db = new DatabaseSync(join(dir, 'spendlock.db'));
   db.exec('CREATE TABLE existing (id INTEGER); BEGIN EXCLUSIVE; INSERT INTO existing VALUES (1)');
-  const child = spawn(process.execPath, ['--import', 'tsx', 'test/fixtures/startup-worker.ts'], { env: { ...process.env, SPENDGATE_DATA: dir }, stdio: ['ignore','pipe','pipe'] });
+  const child = spawn(process.execPath, ['--import', 'tsx', 'test/fixtures/startup-worker.ts'], { env: { ...process.env, SPENDLOCK_DATA: dir }, stdio: ['ignore','pipe','pipe'] });
   let output = '', diagnostic = '';
   let release: ReturnType<typeof setTimeout> | undefined;
   child.stdout.on('data', chunk => {

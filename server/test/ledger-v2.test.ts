@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-vi.hoisted(() => { process.env.SPENDGATE_DATA = `/tmp/spendgate-ledger-v2-${Date.now()}-${Math.random()}`; });
+vi.hoisted(() => { process.env.SPENDLOCK_DATA = `/tmp/spendlock-ledger-v2-${Date.now()}-${Math.random()}`; });
 import { appendLedger, verifyLedger, ledgerToCsv, computeHash } from '../src/core/ledger.js';
 import { store, db } from '../src/core/store.js';
 const intent = { id: 'request', agentId: 'agent', amount: 1, currency: 'GBP', vendor: 'vendor', purpose: 'purpose', rail: 'mcp' as const };

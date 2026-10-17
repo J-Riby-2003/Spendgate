@@ -3,8 +3,8 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 const env = vi.hoisted(() => {
-  process.env.SPENDGATE_DATA = `/tmp/spendgate-test-notify-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return process.env.SPENDGATE_DATA;
+  process.env.SPENDLOCK_DATA = `/tmp/spendlock-test-notify-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return process.env.SPENDLOCK_DATA;
 });
 
 import { onEvent, submitSpend, decide } from '../src/core/engine.js';
@@ -126,17 +126,17 @@ describe('resolveNotifier', () => {
 
   it('returns null (with a warning) when only half-configured', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    expect(resolveNotifier({ SPENDGATE_TELEGRAM_BOT_TOKEN: 'B' })).toBeNull();
-    expect(resolveNotifier({ SPENDGATE_TELEGRAM_CHAT_ID: 'C' })).toBeNull();
+    expect(resolveNotifier({ SPENDLOCK_TELEGRAM_BOT_TOKEN: 'B' })).toBeNull();
+    expect(resolveNotifier({ SPENDLOCK_TELEGRAM_CHAT_ID: 'C' })).toBeNull();
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
   });
 
-  it('uses SPENDGATE_PUBLIC_BASE_URL for link URLs', () => {
+  it('uses SPENDLOCK_PUBLIC_BASE_URL for link URLs', () => {
     const n = resolveNotifier({
-      SPENDGATE_TELEGRAM_BOT_TOKEN: 'B',
-      SPENDGATE_TELEGRAM_CHAT_ID: 'C',
-      SPENDGATE_PUBLIC_BASE_URL: 'https://tunnel.example/',
+      SPENDLOCK_TELEGRAM_BOT_TOKEN: 'B',
+      SPENDLOCK_TELEGRAM_CHAT_ID: 'C',
+      SPENDLOCK_PUBLIC_BASE_URL: 'https://tunnel.example/',
     });
     expect(n?.name).toBe('telegram');
     // trailing slash stripped — links would otherwise get a double slash

@@ -77,7 +77,7 @@ export default function DecidePage({ token }: { token: string }) {
   return (
     <div className="min-h-screen bg-black flex items-center justify-center px-4 py-10">
       <div className="w-full max-w-sm">
-        <p className="font-wordmark text-2xl font-semibold tracking-[0.04em] text-paper">SPENDGATE</p>
+        <p className="font-wordmark text-2xl font-semibold tracking-[0.04em] text-paper">SPENDLOCK</p>
 
         {(phase.kind === 'loading' || phase.kind === 'acting') && (
           <p className="font-mono text-[13px] tracking-[0.04em] text-paper mt-6">

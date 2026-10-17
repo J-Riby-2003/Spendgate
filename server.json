@@ -5,13 +5,13 @@
   "description": "Policy and approval gate for AI agent spending — budgets, human approvals, signed audit ledger.",
   "version": "0.1.0",
   "repository": {
-    "url": "https://github.com/JR03dev/Spendgate",
+    "url": "https://github.com/JR03dev/SpendLock",
     "source": "github"
   },
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://spendgate.fly.dev/mcp",
+      "url": "https://spendlock.fly.dev/mcp",
       "headers": [
         {
           "name": "Authorization",

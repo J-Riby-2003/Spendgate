@@ -22,7 +22,7 @@ about what it does and doesn't protect:
 
 - **The ledger is tamper-evident, not tamper-proof.** Rows are hash-chained and
   HMAC-signed, and `/api/ledger/verify` detects modification. But the operator
-  holds both the signing key (`.spendgate/secret.key`) and the database — the
+  holds both the signing key (`.spendlock/secret.key`) and the database — the
   chain proves continuity, not independence. External anchoring (e.g. daily
   Merkle root elsewhere) is future work.
 - **Operator sessions and per-agent credentials, not a shared token.**
@@ -49,7 +49,7 @@ about what it does and doesn't protect:
    open internet.
 2. Protect operator sessions (don't sign in on shared machines) and treat agent
    credentials as secrets; revoke and re-issue from the console if one leaks.
-3. Back up `.spendgate/` — losing the signing key means the existing chain can
+3. Back up `.spendlock/` — losing the signing key means the existing chain can
    no longer be extended-verified against new rows.
-4. Keep `SPENDGATE_TELEGRAM_*` values in `.spendgate/env` (gitignored), never
+4. Keep `SPENDLOCK_TELEGRAM_*` values in `.spendlock/env` (gitignored), never
    in committed files.

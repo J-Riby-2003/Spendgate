@@ -36,7 +36,7 @@ export function buildMcpServer(principal: AgentPrincipal, connectionSignal?: Abo
     return { isError: true, content: [{ type: 'text' as const, text: `SpendLock error (${status}): ${message}` }] };
   }
   const server = new McpServer(
-    { name: 'spendgate', version: '0.1.0' },
+    { name: 'spendlock', version: '0.1.0' },
     { capabilities: { tools: {} } },
   );
 
