@@ -1,0 +1,25 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.J-Riby-2003/spendgate",
+  "title": "SpendGate",
+  "description": "Policy and approval gate for AI agent spending — budgets, human approvals, signed audit ledger.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/J-Riby-2003/Spendgate",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://spendgate.fly.dev/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer credential for your SpendGate agent (SG-... token)",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
